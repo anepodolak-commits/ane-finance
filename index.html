@@ -247,14 +247,24 @@ table{font-size:12px}th{background:#faf7f9;color:#81717c;font-size:10px;letter-s
 <div class="grid">
 <div class="card col-4"><h2>Cadastrar banco/conta</h2>
 <label>Nome do banco ou conta</label><input id="bancoNome" placeholder="Ex: Itaú, Nubank, Caixa, Dinheiro">
+<label>Instituição</label><input id="bancoInstituicao" placeholder="Ex.: Itaú, XP, Banco do Brasil">
+<label>Agência (opcional)</label><input id="bancoAgencia" placeholder="Ex.: 0001">
+<label>Conta (opcional)</label><input id="bancoNumero" placeholder="Ex.: final 1234">
+<label>Tipo da conta</label><select id="bancoTipo"><option>Corrente</option><option>Poupança</option><option>Pagamento</option><option>Dinheiro</option><option>Outra</option></select>
 <label>Saldo inicial desta conta</label><input id="bancoSaldoInicial" type="number" step="0.01">
-<button onclick="salvarBanco()">Salvar banco/conta</button>
+<input id="bancoEditId" type="hidden"><button onclick="salvarBanco()" id="bancoSalvarBtn">Salvar banco/conta</button><button class="btn-light" onclick="cancelarEdicaoBanco()" type="button">Cancelar edição</button>
+
 </div>
 
 <div class="card col-8"><h2>Minhas contas bancárias</h2>
 <div class="grid" id="listaBancos"></div>
 </div>
 
+<div class="card col-12"><h2>Importar extrato bancário</h2><p class="note">Aceita OFX, CSV e Excel (XLS/XLSX). Para extratos PDF, exporte OFX ou CSV no banco. Prévia e conferência antes de salvar; não envia o arquivo a servidores externos.</p>
+<div class="row"><div><label>Conta de destino</label><select id="extratoBanco"></select></div><div><label>Arquivo</label><input type="file" id="extratoArquivo" accept=".ofx,.csv,.txt,.xlsx,.xls"></div><div><label>&nbsp;</label><button onclick="analisarExtrato()">Analisar extrato</button></div><div><label>&nbsp;</label><button class="btn-light" onclick="limparExtratoPreview()">Limpar prévia</button></div></div>
+<div id="extratoMsg" class="note" aria-live="polite"></div>
+<div id="extratoPreviewArea" class="hidden"><p class="note">Revise todos os lançamentos. Desmarque os que não deseja importar. Valores positivos são entradas; negativos são saídas. Transferências próprias não devem ser contabilizadas como renda ou despesa.</p><div style="overflow-x:auto"><table><thead><tr><th>Importar</th><th>Data</th><th>Descrição</th><th>Valor assinado (R$)</th><th>Tipo</th><th>Categoria</th><th>Observação</th></tr></thead><tbody id="extratoPreviewTabela"></tbody></table></div><button onclick="confirmarExtrato()">Importar lançamentos selecionados</button></div>
+</div>
 <div class="card col-12"><h2>Movimentação bancária do mês</h2>
 <div class="row">
 <div><label>Banco/Conta</label><select id="movBanco"></select></div>
@@ -618,12 +628,28 @@ document.getElementById("tabelaLancamentos").innerHTML=lancamentos.filter(l=>(l.
 function chart(id,cfg){if(typeof Chart==="undefined")return;if(charts[id])charts[id].destroy();charts[id]=new Chart(document.getElementById(id),cfg);}
 function renderGraficos(mes,dm){chart("chartMes",{type:"bar",data:{labels:["Receitas","Gastos diretos","Faturas","Poupado"],datasets:[{label:"Valor",data:[dm.receitas,dm.gastosDiretos,dm.faturas,dm.poupadoManual]}]}});let cat={};dm.lans.filter(l=>l.tipo==="gasto"||l.tipo==="poupado").forEach(l=>cat[l.categoria]=(cat[l.categoria]||0)+l.valor);dm.cps.forEach(c=>cat[c.categoria]=(cat[c.categoria]||0)+c.valor);chart("chartCategorias",{type:"doughnut",data:{labels:Object.keys(cat),datasets:[{data:Object.values(cat)}]}});let porCartao={};dm.cps.forEach(c=>{let card=cartoes.find(x=>x.id===c.cartaoId);let nome=card?card.nome:"Cartão excluído";porCartao[nome]=(porCartao[nome]||0)+c.valor;});chart("chartCartoes",{type:"bar",data:{labels:Object.keys(porCartao),datasets:[{label:"Fatura",data:Object.values(porCartao)}]}});let meses=[-5,-4,-3,-2,-1,0].map(n=>mesAdd(mes,n));chart("chartEvolucao",{type:"line",data:{labels:meses,datasets:[{label:"Gastos + faturas",data:meses.map(m=>dadosMes(m).gastos)},{label:"Receitas",data:meses.map(m=>dadosMes(m).receitas)},{label:"Poupado",data:meses.map(m=>dadosMes(m).poupado)}]}});}
 
+function cancelarEdicaoBanco(){['bancoNome','bancoInstituicao','bancoAgencia','bancoNumero','bancoSaldoInicial','bancoEditId'].forEach(id=>document.getElementById(id).value='');document.getElementById('bancoTipo').value='Corrente';document.getElementById('bancoSalvarBtn').textContent='Salvar banco/conta';}
+function editarBanco(id){const b=bancos.find(x=>x.id===id);if(!b)return;document.getElementById('bancoEditId').value=id;document.getElementById('bancoNome').value=b.nome||'';document.getElementById('bancoInstituicao').value=b.instituicao||'';document.getElementById('bancoAgencia').value=b.agencia||'';document.getElementById('bancoNumero').value=b.numero||'';document.getElementById('bancoTipo').value=b.tipoConta||'Corrente';document.getElementById('bancoSaldoInicial').value=b.saldoInicial||0;document.getElementById('bancoSalvarBtn').textContent='Salvar alterações';document.getElementById('bancoNome').scrollIntoView({behavior:'smooth',block:'center'});}
+
+let extratoPreview=[];
+function extratoDinheiro(v){let t=String(v??'').replace(/\s|R\$/gi,'').trim();if(!t)return NaN;let neg=/^\(.*\)$/.test(t)||t.startsWith('-');t=t.replace(/[()\-+]/g,'');if(t.includes(',')&&t.includes('.'))t=t.lastIndexOf(',')>t.lastIndexOf('.')?t.replace(/\./g,'').replace(',','.'):t.replace(/,/g,'');else if(t.includes(','))t=t.replace(',','.');else if((t.match(/\./g)||[]).length>1)t=t.replace(/\./g,'');let n=Number(t);return Number.isFinite(n)?(neg?-n:n):NaN;}
+function extratoData(v){if(v instanceof Date&&!isNaN(v))return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0');let x=String(v||'').trim();if(/^\d{4}-\d{2}-\d{2}/.test(x))return x.slice(0,10);if(/^\d{8}/.test(x))return x.slice(0,4)+'-'+x.slice(4,6)+'-'+x.slice(6,8);const m=x.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);if(m)return (m[3].length===2?'20'+m[3]:m[3])+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');return '';}
+function extratoCSV(texto){const primeira=texto.split(/\r?\n/).find(v=>v.trim())||'';const delim=[';',',','\t'].sort((a,b)=>primeira.split(b).length-primeira.split(a).length)[0];let linhas=[],linha=[],campo='',aspas=false;for(let i=0;i<texto.length;i++){const c=texto[i];if(c==='"'){if(aspas&&texto[i+1]==='"'){campo+='"';i++;}else aspas=!aspas;}else if(c===delim&&!aspas){linha.push(campo);campo='';}else if((c==='\n'||c==='\r')&&!aspas){if(c==='\r'&&texto[i+1]==='\n')i++;linha.push(campo);if(linha.some(v=>String(v).trim()))linhas.push(linha);linha=[];campo='';}else campo+=c;}linha.push(campo);if(linha.some(v=>String(v).trim()))linhas.push(linha);return linhas;}
+function extratoImportarLinhas(linhas){if(!linhas.length)return[];const norm=v=>String(v??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();const cab=linhas[0].map(norm);const buscar=(...termos)=>cab.findIndex(h=>termos.some(t=>h===t||h.includes(t)));const di=buscar('data','date','dtposted'),ds=buscar('descricao','historico','lancamento','detalhe','memo','description','payee'),va=buscar('valor','amount','quantia','total'),cr=buscar('credito','credit'),db=buscar('debito','debit'),tipo=buscar('tipo','type');if(di<0||ds<0||(va<0&&cr<0&&db<0))throw Error('Não encontrei as colunas de data, descrição e valor. Exporte um CSV com cabeçalhos ou um OFX do seu banco.');return linhas.slice(1).map(row=>{const data=extratoData(row[di]),descricao=String(row[ds]||'').trim();let valor=va>=0?extratoDinheiro(row[va]):NaN;if(!Number.isFinite(valor)){const credito=cr>=0?extratoDinheiro(row[cr]):0,debito=db>=0?extratoDinheiro(row[db]):0;valor=(Number.isFinite(credito)?credito:0)-(Number.isFinite(debito)?Math.abs(debito):0);}const t=tipo>=0?norm(row[tipo]):'';if(t.startsWith('d')&&valor>0)valor=-valor;return {data,descricao,valor};}).filter(r=>r.data&&r.descricao&&Number.isFinite(r.valor)&&r.valor!==0);}
+function extratoOFX(texto){const blocos=texto.match(/<STMTTRN>[\s\S]*?(?:<\/STMTTRN>|(?=<STMTTRN>)|$)/gi)||[];const pegar=(b,tag)=>{const m=b.match(new RegExp('<'+tag+'>([^<\r\n]+)','i'));return m?m[1].trim():'';};return blocos.map(b=>({data:extratoData(pegar(b,'DTPOSTED')),descricao:pegar(b,'MEMO')||pegar(b,'NAME')||'Movimentação',valor:extratoDinheiro(pegar(b,'TRNAMT')),fitid:pegar(b,'FITID')})).filter(x=>x.data&&Number.isFinite(x.valor)&&x.valor!==0);}
+function extratoChave(r){return [r.data,(r.descricao||'').toLocaleLowerCase('pt-BR').replace(/\s+/g,' ').trim(),Number(r.valor).toFixed(2)].join('|');}
+function limparExtratoPreview(){extratoPreview=[];document.getElementById('extratoPreviewArea').classList.add('hidden');document.getElementById('extratoMsg').textContent='';}
+async function analisarExtrato(){const file=document.getElementById('extratoArquivo').files[0],bancoId=Number(document.getElementById('extratoBanco').value),msg=document.getElementById('extratoMsg');limparExtratoPreview();if(!file||!bancoId)return alert('Selecione uma conta e o arquivo do extrato.');try{let linhas=[];const nome=file.name.toLowerCase();if(nome.endsWith('.ofx')){linhas=extratoOFX(await file.text());}else if(nome.endsWith('.csv')||nome.endsWith('.txt')){const bytes=await file.arrayBuffer();let txt=new TextDecoder('utf-8').decode(bytes);if(txt.includes('\uFFFD'))txt=new TextDecoder('windows-1252').decode(bytes);linhas=extratoImportarLinhas(extratoCSV(txt.replace(/^\uFEFF/,'')));}else if(/\.xlsx?$/.test(nome)){if(typeof XLSX==='undefined')throw Error('Biblioteca de Excel indisponível. Conecte-se à internet ou exporte CSV.');const wb=XLSX.read(await file.arrayBuffer(),{type:'array',cellDates:true});linhas=extratoImportarLinhas(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:''}));}else throw Error('Formato não suportado. Use OFX, CSV, XLS ou XLSX.');if(!linhas.length)throw Error('Nenhum lançamento encontrado. Confira o formato do extrato.');const existentes=new Set(movBancos.filter(m=>m.bancoId===bancoId).map(m=>extratoChave({...m,valor:m.tipo==='entrada'?Math.abs(m.valor):-Math.abs(m.valor)})));extratoPreview=linhas.map((r,i)=>({...r,bancoId,marcado:!existentes.has(extratoChave(r)),duplicado:existentes.has(extratoChave(r)),tipo:r.valor>0?'entrada':'saida',categoria:'Outros',uid:i}));extratoRender();msg.textContent=extratoPreview.length+' movimentações identificadas. Revise a prévia antes de importar.';}catch(e){msg.textContent='Não foi possível analisar: '+e.message;}}
+function extratoRender(){const area=document.getElementById('extratoPreviewArea');area.classList.toggle('hidden',!extratoPreview.length);document.getElementById('extratoPreviewTabela').innerHTML=extratoPreview.map((r,i)=>'<tr><td><input type="checkbox" '+(r.marcado?'checked':'')+' onchange="extratoPreview['+i+'].marcado=this.checked"></td><td><input type="date" value="'+r.data+'" onchange="extratoPreview['+i+'].data=this.value"></td><td><input value="'+htmlSeguro(r.descricao)+'" onchange="extratoPreview['+i+'].descricao=this.value"></td><td><input type="number" step="0.01" value="'+r.valor+'" onchange="extratoPreview['+i+'].valor=Number(this.value)"></td><td><select onchange="extratoPreview['+i+'].tipo=this.value"><option value="entrada" '+(r.tipo==='entrada'?'selected':'')+'>Entrada</option><option value="saida" '+(r.tipo==='saida'?'selected':'')+'>Saída</option><option value="transferencia" '+(r.tipo==='transferencia'?'selected':'')+'>Transferência</option></select></td><td><select onchange="extratoPreview['+i+'].categoria=this.value">'+categorias.map(c=>'<option '+(c===r.categoria?'selected':'')+'>'+htmlSeguro(c)+'</option>').join('')+'</select></td><td>'+(r.duplicado?'Possível duplicado':'—')+'</td></tr>').join('');}
+function confirmarExtrato(){const selecionados=extratoPreview.filter(r=>r.marcado);if(!selecionados.length)return alert('Nenhum lançamento selecionado.');const keys=new Set(movBancos.map(m=>m.bancoId+'|'+extratoChave({...m,valor:m.tipo==='entrada'?Math.abs(m.valor):-Math.abs(m.valor)})));let adicionados=0,pulados=0;for(const r of selecionados){const v=Number(r.valor),key=r.bancoId+'|'+extratoChave(r);if(keys.has(key)){pulados++;continue;}if(!r.data||!r.descricao.trim()||!Number.isFinite(v)||v===0){pulados++;continue;}movBancos.push({id:Date.now()+Math.floor(Math.random()*1e7),bancoId:r.bancoId,data:r.data,descricao:r.descricao.trim(),valor:Math.abs(v),tipo:r.tipo,categoria:r.categoria,origem:'extrato'});keys.add(key);adicionados++;}salvar();atualizar();limparExtratoPreview();alert(adicionados+' lançamentos importados. '+pulados+' ignorados por duplicidade ou erro.');}
+
 function salvarBanco(){
   let nome=document.getElementById("bancoNome").value.trim();
   if(!nome)return alert("Digite o nome do banco/conta.");
-  bancos.push({id:Date.now(),nome:nome,saldoInicial:Number(document.getElementById("bancoSaldoInicial").value)||0});
-  document.getElementById("bancoNome").value="";
-  document.getElementById("bancoSaldoInicial").value="";
+  const id=Number(document.getElementById('bancoEditId').value);
+  const dados={nome,instituicao:document.getElementById('bancoInstituicao').value.trim(),agencia:document.getElementById('bancoAgencia').value.trim(),numero:document.getElementById('bancoNumero').value.trim(),tipoConta:document.getElementById('bancoTipo').value,saldoInicial:Number(document.getElementById('bancoSaldoInicial').value)||0};
+  if(id){const b=bancos.find(x=>x.id===id);if(b)Object.assign(b,dados);}else bancos.push({id:Date.now(),...dados});
+  cancelarEdicaoBanco();
   salvar();atualizar();
 }
 function excluirBanco(id){
@@ -674,14 +700,19 @@ function movBancosFiltrados(){
 }
 
 function renderBancos(mes){
-  document.getElementById("movBanco").innerHTML=bancos.map(b=>"<option value='"+b.id+"'>"+b.nome+"</option>").join("");
+  const movimentoAtual=document.getElementById('movBanco').value;
+  document.getElementById("movBanco").innerHTML=bancos.map(b=>"<option value='"+b.id+"'>"+htmlSeguro(b.nome)+"</option>").join("");
+  if(bancos.some(b=>String(b.id)===movimentoAtual))document.getElementById('movBanco').value=movimentoAtual;
+  const extratoSelect=document.getElementById('extratoBanco');const antesExtrato=extratoSelect.value;
+  extratoSelect.innerHTML=bancos.map(b=>"<option value='"+b.id+"'>"+htmlSeguro(b.nome)+"</option>").join('');
+  if(bancos.some(b=>String(b.id)===antesExtrato))extratoSelect.value=antesExtrato;
   let html="";
   bancos.forEach(b=>{
-    let movs=movBancos.filter(m=>m.bancoId===b.id && (m.data||"").slice(0,7)===mes);
+    let movs=movBancos.filter(m=>m.bancoId===b.id && (m.data||"").slice(0,7)<=mes);
     let entradas=movs.filter(m=>m.tipo==="entrada").reduce((s,m)=>s+m.valor,0);
     let saidas=movs.filter(m=>m.tipo==="saida"||m.tipo==="transferencia").reduce((s,m)=>s+m.valor,0);
     let saldo=(b.saldoInicial||0)+entradas-saidas;
-    html += "<div class='col-4'><div class='card'><h2>"+b.nome+"</h2><div class='kpi'><b>Saldo no mês</b><div>"+moeda(saldo)+"</div></div><p class='note'>Entradas: "+moeda(entradas)+"<br>Saídas: "+moeda(saidas)+"<br>Saldo inicial: "+moeda(b.saldoInicial)+"</p><button class='btn-danger' onclick='excluirBanco("+b.id+")'>Excluir</button></div></div>";
+    html += "<div class='col-4'><div class='card'><h2>"+b.nome+"</h2><div class='kpi'><b>Saldo até o mês</b><div>"+moeda(saldo)+"</div></div><p class='note'>Entradas: "+moeda(entradas)+"<br>Saídas: "+moeda(saidas)+"<br>Saldo inicial: "+moeda(b.saldoInicial)+"<br>Instituição: "+htmlSeguro(b.instituicao||'—')+"<br>Agência: "+htmlSeguro(b.agencia||'—')+" · Conta: "+htmlSeguro(b.numero||'—')+"<br>Tipo: "+htmlSeguro(b.tipoConta||'Corrente')+"</p><button class='btn-light' onclick='editarBanco("+b.id+")'>Editar dados</button><button class='btn-danger' onclick='excluirBanco("+b.id+")'>Excluir</button></div></div>";
   });
   if(!html)html="<p class='note'>Nenhum banco/conta cadastrado ainda.</p>";
   document.getElementById("listaBancos").innerHTML=html;
