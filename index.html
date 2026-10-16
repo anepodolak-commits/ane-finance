@@ -109,6 +109,7 @@ table{font-size:12px}th{background:#faf7f9;color:#81717c;font-size:10px;letter-s
  <nav class="tabs" aria-label="Navegação principal">
  <button class="active" data-title="Visão geral" onclick="aba('dashboard',this)"><span class="nav-ico">◫</span> Visão geral</button>
  <button data-title="Cartões de crédito" onclick="aba('cartoes',this)"><span class="nav-ico">▣</span> Cartões de crédito</button>
+ <button data-title="Investimentos" onclick="aba('investimentos',this)"><span class="nav-ico">◇</span> Investimentos</button>
  <button data-title="Contas a pagar" onclick="aba('pagamentos',this)"><span class="nav-ico">✓</span> Contas a pagar</button>
  <button data-title="Contas e bancos" onclick="aba('bancos',this)"><span class="nav-ico">▤</span> Contas e bancos</button>
  <button data-title="Importar faturas" onclick="aba('importacao',this)"><span class="nav-ico">⇩</span> Importar faturas</button>
@@ -432,6 +433,14 @@ table{font-size:12px}th{background:#faf7f9;color:#81717c;font-size:10px;letter-s
 <div style="overflow-x:auto"><table><thead><tr><th>Vencimento</th><th>Descrição</th><th>Tipo</th><th>Valor</th><th>Status</th><th>Pagamento</th><th>Ações</th></tr></thead><tbody id="payTabela"></tbody></table></div></div>
 <div class="card col-12"><h2>Histórico de pagamentos registrados</h2><div style="overflow-x:auto"><table><thead><tr><th>Pago em</th><th>Descrição</th><th>Banco</th><th>Valor pago</th><th>Detalhes</th></tr></thead><tbody id="payHistorico"></tbody></table></div></div>
 </div></section>
+<section id="investimentos" class="hidden"><div class="grid">
+<div class="card col-12"><h2>◇ Meus investimentos</h2><p class="note">Acompanhe cada aplicação, o saldo e os rendimentos mês a mês. Estes valores não são somados automaticamente aos saldos bancários.</p><div class="row"><div class="kpi"><b>Patrimônio investido</b><div id="invTotal">R$ 0,00</div></div><div class="kpi"><b>Rendimento do mês</b><div id="invRendimento">R$ 0,00</div></div><div class="kpi"><b>Aportes do mês</b><div id="invAportes">R$ 0,00</div></div><div class="kpi"><b>Rendimento acumulado</b><div id="invAcumulado">R$ 0,00</div></div></div></div>
+<div class="card col-4"><h2>Adicionar investimento</h2><label>Nome da aplicação</label><input id="invNome" placeholder="Ex.: CDB, Tesouro, Reserva"><label>Instituição</label><input id="invInstituicao" placeholder="Ex.: XP, Itaú"><label>Tipo</label><select id="invTipo"><option>Renda fixa</option><option>Tesouro Direto</option><option>Fundos</option><option>Ações</option><option>FIIs</option><option>Previdência</option><option>Criptoativos</option><option>Outros</option></select><button onclick="invCadastrar()">Cadastrar investimento</button></div>
+<div class="card col-8"><h2>Atualização mensal</h2><label>Investimento</label><select id="invSelecionado"></select><div class="row"><div><label>Mês</label><input type="month" id="invMes"></div><div><label>Saldo final (R$)</label><input type="number" id="invSaldo" min="0" step="0.01" placeholder="0,00"></div><div><label>Aportes (R$)</label><input type="number" id="invAporte" min="0" step="0.01" value="0"></div><div><label>Retiradas (R$)</label><input type="number" id="invRetirada" min="0" step="0.01" value="0"></div></div><p class="note">Rendimento = saldo final − saldo anterior − aportes + retiradas. O primeiro registro define o saldo inicial, sem gerar lucro artificial. Se pular meses, o rendimento será atribuído ao próximo mês registrado.</p><button onclick="invRegistrar()">Salvar posição do mês</button></div>
+<div class="card col-12"><h2>Carteira de investimentos</h2><div style="overflow-x:auto"><table><thead><tr><th>Aplicação</th><th>Instituição / tipo</th><th>Última atualização</th><th>Saldo</th><th>Último rendimento</th><th></th></tr></thead><tbody id="invCarteira"></tbody></table></div></div>
+<div class="card col-12"><h2>Evolução do patrimônio</h2><canvas id="invGrafico"></canvas></div>
+<div class="card col-12"><h2>Histórico</h2><div style="overflow-x:auto"><table><thead><tr><th>Mês</th><th>Investimento</th><th>Saldo</th><th>Aportes</th><th>Retiradas</th><th>Rendimento</th><th></th></tr></thead><tbody id="invHistorico"></tbody></table></div></div>
+</div></section>
 <section id="backup"
  class="hidden"><div class="grid">
 <div class="card col-6"><h2>Faça uma cópia dos seus dados</h2><p class="note">Para migrar do HTML antigo, faça um backup JSON nele e cole o conteúdo em Restaurar. Após restaurar, o sistema sincronizará no Supabase.</p><button onclick="baixarBackup()">Baixar backup JSON</button><button onclick="exportarCSV()">Exportar CSV</button></div>
@@ -462,8 +471,20 @@ let charts={};
 let previaImportacao=[];
 function moeda(v){return (Number(v)||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});}
 function mesAtual(){return new Date().toISOString().slice(0,7);}
+let investimentos=[];
+function invEsc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function invN(v){return Math.round((Number(v)||0)*100)/100;}
+function invCalculos(ap){const regs=(ap.registros||[]).slice().sort((a,b)=>a.mes.localeCompare(b.mes));return regs.map((r,i)=>({...r,rendimento:i===0?0:invN(r.saldo-regs[i-1].saldo-r.aporte+r.retirada)}));}
+function invCadastrar(){const nome=document.getElementById('invNome').value.trim(),inst=document.getElementById('invInstituicao').value.trim();if(!nome)return alert('Informe o nome.');investimentos.push({id:Date.now()+'-'+Math.random().toString(36).slice(2,7),nome,instituicao:inst,tipo:document.getElementById('invTipo').value,registros:[]});document.getElementById('invNome').value='';document.getElementById('invInstituicao').value='';salvar();invRender();}
+function invRegistrar(){const ap=investimentos.find(x=>String(x.id)===document.getElementById('invSelecionado').value),mes=document.getElementById('invMes').value,inp=document.getElementById('invSaldo'),saldo=Number(inp.value),aporte=Number(document.getElementById('invAporte').value||0),retirada=Number(document.getElementById('invRetirada').value||0);if(!ap||!/^\d{4}-\d{2}$/.test(mes)||inp.value===''||[saldo,aporte,retirada].some(x=>!Number.isFinite(x)||x<0))return alert('Confira mês, investimento e valores positivos.');let i=ap.registros.findIndex(r=>r.mes===mes);if(i>=0&&!confirm('Substituir a atualização existente?'))return;let r={mes,saldo:invN(saldo),aporte:invN(aporte),retirada:invN(retirada)};if(i>=0)ap.registros[i]=r;else ap.registros.push(r);salvar();invRender();}
+function invExcluirRegistro(id,mes){if(!confirm('Excluir registro mensal? O rendimento dos meses seguintes pode mudar.'))return;let ap=investimentos.find(a=>String(a.id)===String(id));if(!ap)return;ap.registros=ap.registros.filter(r=>r.mes!==mes);salvar();invRender();}
+function invExcluirAplicacao(id){let ap=investimentos.find(a=>String(a.id)===String(id));if(!ap||!confirm('Excluir '+ap.nome+' e todo o histórico?'))return;investimentos=investimentos.filter(a=>String(a.id)!==String(id));salvar();invRender();}
+let invChart=null;
+function invRender(){const sel=document.getElementById('invSelecionado');if(!sel)return;let prev=sel.value;sel.innerHTML=investimentos.map(a=>'<option value="'+invEsc(a.id)+'">'+invEsc(a.nome)+'</option>').join('');if(investimentos.some(a=>String(a.id)===prev))sel.value=prev;let packs=investimentos.map(ap=>({ap,regs:invCalculos(ap)}));let mes=document.getElementById('invMes').value||mesSelecionado(),total=0,rendimento=0,aportes=0,acumulado=0,hist=[],rows=[];packs.forEach(({ap,regs})=>{let last=regs.at(-1);total+=last?.saldo||0;let now=regs.find(x=>x.mes===mes);rendimento+=now?.rendimento||0;aportes+=now?.aporte||0;acumulado+=regs.reduce((v,r)=>v+r.rendimento,0);rows.push('<tr><td>'+invEsc(ap.nome)+'</td><td>'+invEsc(ap.instituicao)+' · '+invEsc(ap.tipo)+'</td><td>'+(last?.mes||'—')+'</td><td>'+moeda(last?.saldo||0)+'</td><td>'+moeda(last?.rendimento||0)+'</td><td><button class="btn-danger" onclick="invExcluirAplicacao(\''+ap.id+'\')">Excluir</button></td></tr>');regs.forEach(r=>hist.push({...r,id:ap.id,nome:ap.nome}));});document.getElementById('invTotal').textContent=moeda(total);document.getElementById('invRendimento').textContent=moeda(rendimento);document.getElementById('invAportes').textContent=moeda(aportes);document.getElementById('invAcumulado').textContent=moeda(acumulado);document.getElementById('invCarteira').innerHTML=rows.join('')||'<tr><td colspan="6">Cadastre uma aplicação.</td></tr>';document.getElementById('invHistorico').innerHTML=hist.sort((a,b)=>b.mes.localeCompare(a.mes)).map(r=>'<tr><td>'+r.mes+'</td><td>'+invEsc(r.nome)+'</td><td>'+moeda(r.saldo)+'</td><td>'+moeda(r.aporte)+'</td><td>'+moeda(r.retirada)+'</td><td>'+moeda(r.rendimento)+'</td><td><button class="btn-danger" onclick="invExcluirRegistro(\''+r.id+'\',\''+r.mes+'\')">Excluir</button></td></tr>').join('')||'<tr><td colspan="7">Sem atualizações.</td></tr>';let meses=[...new Set(hist.map(r=>r.mes))].sort(),values=meses.map(m=>packs.reduce((v,p)=>v+(p.regs.filter(r=>r.mes<=m).at(-1)?.saldo||0),0));if(invChart){invChart.destroy();invChart=null;}if(meses.length&&typeof Chart!=='undefined')invChart=new Chart(document.getElementById('invGrafico'),{type:'line',data:{labels:meses,datasets:[{label:'Patrimônio',data:values,borderColor:'#a83b70',tension:.25}]},options:{plugins:{legend:{display:false}}}});}
+
 function salvar(){
 try{
+localStorage.setItem("ane_investimentos",JSON.stringify(investimentos));
 localStorage.setItem('ane_categorias',JSON.stringify(categorias));
 localStorage.setItem('ane_cat_detalhes',JSON.stringify(detalhesCategorias));
 localStorage.setItem('ane_cat_regras',JSON.stringify(regrasCategorias));
@@ -493,7 +514,7 @@ function mesAdd(mes,n){
   return ano+"-"+String(mesNum).padStart(2,"0");
 }
 function popularCategorias(){["gastoCategoria","lanCategoria","movCategoria","orcCategoria","fixaCategoria","payCategoria","catRegraCategoria"].forEach(id=>{let el=document.getElementById(id);if(!el)return;let antigo=el.value;el.innerHTML=categorias.map(c=>"<option value='"+htmlSeguro(c)+"'>"+htmlSeguro(c)+"</option>").join("");if(categorias.includes(antigo))el.value=antigo;});}
-function iniciar(){popularCategorias();document.getElementById("impMes").value=mesAtual();document.getElementById("saldoAnterior").value=config.saldoAnterior||0;document.getElementById("metaEconomia").value=config.meta||0;document.getElementById("mesFiltro").value=mesAtual();document.getElementById("gastoMesFatura").value=mesAtual();
+function iniciar(){popularCategorias();document.getElementById("impMes").value=mesAtual();document.getElementById("invMes").value=mesAtual();document.getElementById("saldoAnterior").value=config.saldoAnterior||0;document.getElementById("metaEconomia").value=config.meta||0;document.getElementById("mesFiltro").value=mesAtual();document.getElementById("gastoMesFatura").value=mesAtual();
 if(document.getElementById("filtroCartaoMes")) document.getElementById("filtroCartaoMes").value=mesAtual();
 if(document.getElementById("filtroCartaoAno")) document.getElementById("filtroCartaoAno").value=new Date().getFullYear();
 if(document.getElementById("filtroBancoMes")) document.getElementById("filtroBancoMes").value=mesAtual();
@@ -561,7 +582,7 @@ function excluirCompraCartao(id){comprasCartao=comprasCartao.filter(c=>c.id!==id
 function adicionarLancamento(){let valor=Number(document.getElementById("lanValor").value)||0;if(!valor)return alert("Digite um valor.");lancamentos.push({id:Date.now(),data:document.getElementById("lanData").value,descricao:document.getElementById("lanDescricao").value,valor:valor,tipo:document.getElementById("lanTipo").value,categoria:document.getElementById("lanCategoria").value,conta:document.getElementById("lanConta").value});document.getElementById("lanDescricao").value="";document.getElementById("lanValor").value="";salvar();atualizar();}
 function excluirLancamento(id){lancamentos=lancamentos.filter(l=>l.id!==id);salvar();atualizar();}
 function dadosMes(mes){let lans=lancamentos.filter(l=>(l.data||"").slice(0,7)===mes);let cps=comprasCartao.filter(c=>c.mesFatura===mes);let receitas=lans.filter(l=>l.tipo==="receita").reduce((s,l)=>s+l.valor,0);let gastosDiretos=lans.filter(l=>l.tipo==="gasto").reduce((s,l)=>s+l.valor,0);let poupadoManual=lans.filter(l=>l.tipo==="poupado").reduce((s,l)=>s+l.valor,0);let faturas=cps.reduce((s,c)=>s+c.valor,0);let gastos=gastosDiretos+faturas;let saldo=(config.saldoAnterior||0)+receitas-gastos-poupadoManual;let poupado=poupadoManual+Math.max(0,saldo);return {lans,cps,receitas,gastosDiretos,poupadoManual,faturas,gastos,saldo,poupado};}
-function atualizar(){salvar();let mes=mesSelecionado();let dm=dadosMes(mes);document.getElementById("kpiSaldo").innerText=moeda(dm.saldo);document.getElementById("kpiReceitas").innerText=moeda(dm.receitas);document.getElementById("kpiGastos").innerText=moeda(dm.gastos);document.getElementById("kpiPoupado").innerText=moeda(dm.poupado);let pct=config.meta>0?Math.min(100,(dm.poupado/config.meta)*100):0;document.getElementById("barraMeta").style.width=pct+"%";document.getElementById("textoMeta").innerText=pct.toFixed(0)+"% da meta";document.getElementById("gastoCartao").innerHTML=cartoes.map(c=>"<option value='"+c.id+"'>"+c.nome+"</option>").join("");
+function atualizar(){salvar();invRender();let mes=mesSelecionado();let dm=dadosMes(mes);document.getElementById("kpiSaldo").innerText=moeda(dm.saldo);document.getElementById("kpiReceitas").innerText=moeda(dm.receitas);document.getElementById("kpiGastos").innerText=moeda(dm.gastos);document.getElementById("kpiPoupado").innerText=moeda(dm.poupado);let pct=config.meta>0?Math.min(100,(dm.poupado/config.meta)*100):0;document.getElementById("barraMeta").style.width=pct+"%";document.getElementById("textoMeta").innerText=pct.toFixed(0)+"% da meta";document.getElementById("gastoCartao").innerHTML=cartoes.map(c=>"<option value='"+c.id+"'>"+c.nome+"</option>").join("");
 if(document.getElementById("filtroCartaoId")){
   let atual=document.getElementById("filtroCartaoId").value||"todos";
   document.getElementById("filtroCartaoId").innerHTML="<option value='todos'>Todos os cartões</option>"+cartoes.map(c=>"<option value='"+c.id+"'>"+c.nome+"</option>").join("");
@@ -858,7 +879,7 @@ function renderExtrasFinanceiros(mes,dm){
 
 function limparSistemaCompleto(){
   if(!confirm("Tem certeza que deseja zerar todos os dados do Controle Financeiro da Ane?")) return;
-  ["ane_config","ane_cartoes","ane_compras_cartao","ane_lancamentos","ane_bancos","ane_mov_bancos","ane_orcamentos","ane_contas_fixas","ane_categorias","ane_cat_detalhes","ane_cat_regras","ane_contas_pagar","ane_faturas_oficiais","ane_pagamentos"].forEach(k=>localStorage.removeItem(k));
+  ["ane_config","ane_cartoes","ane_compras_cartao","ane_lancamentos","ane_bancos","ane_mov_bancos","ane_orcamentos","ane_contas_fixas","ane_categorias","ane_cat_detalhes","ane_cat_regras","ane_contas_pagar","ane_faturas_oficiais","ane_pagamentos","ane_investimentos"].forEach(k=>localStorage.removeItem(k));
   config={saldoAnterior:0,meta:0};
   cartoes=[];
   comprasCartao=[];
@@ -867,13 +888,13 @@ function limparSistemaCompleto(){
   movBancos=[];
   orcamentos=[];
   contasFixas=[];
-  contasPagar=[];faturasOficiais=[];pagamentos=[];
+  contasPagar=[];faturasOficiais=[];pagamentos=[];investimentos=[];
   categorias=categoriasPadrao.slice();detalhesCategorias={};regrasCategorias=[];
   popularCategorias();salvar();atualizar();
 }
 
-function baixarBackup(){let blob=new Blob([JSON.stringify({config,cartoes,comprasCartao,lancamentos,bancos,movBancos,orcamentos,contasFixas,contasPagar,faturasOficiais,pagamentos,categorias,detalhesCategorias,regrasCategorias},null,2)],{type:"application/json"});let a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="backup-controle-financeiro.json";a.click();}
-function restaurarBackup(){try{let b=JSON.parse(document.getElementById("backupTexto").value);config=b.config||config;cartoes=b.cartoes||[];comprasCartao=b.comprasCartao||[];lancamentos=b.lancamentos||[];bancos=b.bancos||[];movBancos=b.movBancos||[];orcamentos=b.orcamentos||[];contasFixas=b.contasFixas||[];contasPagar=b.contasPagar||[];faturasOficiais=b.faturasOficiais||[];pagamentos=b.pagamentos||[];categorias=Array.isArray(b.categorias)&&b.categorias.length?b.categorias:categoriasPadrao.slice();detalhesCategorias=b.detalhesCategorias||{};regrasCategorias=b.regrasCategorias||[];popularCategorias();salvar();atualizar();alert("Backup restaurado. Aguarde a mensagem de sincronização na barra lateral.");}catch(e){alert("Backup inválido.");}}
+function baixarBackup(){let blob=new Blob([JSON.stringify({config,cartoes,comprasCartao,lancamentos,bancos,movBancos,orcamentos,contasFixas,contasPagar,faturasOficiais,pagamentos,categorias,detalhesCategorias,regrasCategorias,investimentos},null,2)],{type:"application/json"});let a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="backup-controle-financeiro.json";a.click();}
+function restaurarBackup(){try{let b=JSON.parse(document.getElementById("backupTexto").value);config=b.config||config;cartoes=b.cartoes||[];comprasCartao=b.comprasCartao||[];lancamentos=b.lancamentos||[];bancos=b.bancos||[];movBancos=b.movBancos||[];orcamentos=b.orcamentos||[];contasFixas=b.contasFixas||[];contasPagar=b.contasPagar||[];faturasOficiais=b.faturasOficiais||[];pagamentos=b.pagamentos||[];investimentos=b.investimentos||[];categorias=Array.isArray(b.categorias)&&b.categorias.length?b.categorias:categoriasPadrao.slice();detalhesCategorias=b.detalhesCategorias||{};regrasCategorias=b.regrasCategorias||[];popularCategorias();salvar();atualizar();alert("Backup restaurado. Aguarde a mensagem de sincronização na barra lateral.");}catch(e){alert("Backup inválido.");}}
 function exportarCSV(){let linhas=[["tipo","data_mes","cartao","descricao","categoria","parcela","valor"]];lancamentos.forEach(l=>linhas.push([l.tipo,l.data,"",l.descricao,l.categoria,"",l.valor]));comprasCartao.forEach(c=>{let card=cartoes.find(x=>x.id===c.cartaoId);linhas.push(["cartao",c.mesFatura,card?card.nome:"",c.descricao,c.categoria,c.parcelaAtual+"/"+c.parcelas,c.valor]);});movBancos.forEach(m=>{let banco=bancos.find(b=>b.id===m.bancoId);linhas.push(["banco",m.data,banco?banco.nome:"",m.descricao,m.categoria,m.tipo,m.valor]);});let csv=linhas.map(r=>r.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(";")).join("\n");let blob=new Blob([csv],{type:"text/csv;charset=utf-8"});let a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="controle-financeiro.csv";a.click();}
 function limparTudoMes(){let mes=mesSelecionado();if(!confirm("Limpar todos os lançamentos e faturas do mês selecionado?"))return;lancamentos=lancamentos.filter(l=>(l.data||"").slice(0,7)!==mes);comprasCartao=comprasCartao.filter(c=>c.mesFatura!==mes);salvar();atualizar();}
 
@@ -1100,15 +1121,15 @@ function adicionarRegraCategoria(){let texto=catNormal(document.getElementById('
 function removerRegraCategoria(i){regrasCategorias.splice(i,1);salvar();renderCategorias();}
 
 
-const ANE_FIELDS=['config','cartoes','comprasCartao','lancamentos','bancos','movBancos','orcamentos','contasFixas','contasPagar','faturasOficiais','pagamentos','categorias','detalhesCategorias','regrasCategorias'];
-const ANE_KEYS=['ane_config','ane_cartoes','ane_compras_cartao','ane_lancamentos','ane_bancos','ane_mov_bancos','ane_orcamentos','ane_contas_fixas','ane_contas_pagar','ane_faturas_oficiais','ane_pagamentos','ane_categorias','ane_cat_detalhes','ane_cat_regras'];
+const ANE_FIELDS=['config','cartoes','comprasCartao','lancamentos','bancos','movBancos','orcamentos','contasFixas','contasPagar','faturasOficiais','pagamentos','categorias','detalhesCategorias','regrasCategorias','investimentos'];
+const ANE_KEYS=['ane_config','ane_cartoes','ane_compras_cartao','ane_lancamentos','ane_bancos','ane_mov_bancos','ane_orcamentos','ane_contas_fixas','ane_contas_pagar','ane_faturas_oficiais','ane_pagamentos','ane_categorias','ane_cat_detalhes','ane_cat_regras','ane_investimentos'];
 let aneClient=null,aneUser=null,aneTimer=null,aneSaving=false,anePending=false,aneLastSent='',aneRemoteUpdated=null;
 window.anePodeSincronizar=false;
-function aneState(){return {config,cartoes,comprasCartao,lancamentos,bancos,movBancos,orcamentos,contasFixas,contasPagar,faturasOficiais,pagamentos,categorias,detalhesCategorias,regrasCategorias};}
+function aneState(){return {config,cartoes,comprasCartao,lancamentos,bancos,movBancos,orcamentos,contasFixas,contasPagar,faturasOficiais,pagamentos,categorias,detalhesCategorias,regrasCategorias,investimentos};}
 function aneApply(data){
  config=data.config||{saldoAnterior:0,meta:0};cartoes=data.cartoes||[];comprasCartao=data.comprasCartao||[];lancamentos=data.lancamentos||[];
  bancos=data.bancos||[];movBancos=data.movBancos||[];orcamentos=data.orcamentos||[];contasFixas=data.contasFixas||[];
- contasPagar=data.contasPagar||[];faturasOficiais=data.faturasOficiais||[];pagamentos=data.pagamentos||[];
+ contasPagar=data.contasPagar||[];faturasOficiais=data.faturasOficiais||[];pagamentos=data.pagamentos||[];investimentos=Array.isArray(data.investimentos)?data.investimentos:[];
  categorias=Array.isArray(data.categorias)&&data.categorias.length?data.categorias:categoriasPadrao.slice();
  detalhesCategorias=data.detalhesCategorias||{};regrasCategorias=data.regrasCategorias||[];
  ANE_KEYS.forEach((k,i)=>localStorage.setItem(k,JSON.stringify(aneState()[ANE_FIELDS[i]])));
