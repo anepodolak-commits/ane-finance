@@ -95,6 +95,19 @@ table{font-size:12px}th{background:#faf7f9;color:#81717c;font-size:10px;letter-s
 .mobile-logout{background:#f6eaf0;color:#923f68;width:auto;font-size:12px}
 @media(max-width:760px){.mobile-logout{margin:5px 0 8px}}
 </style>
+<style>
+.ane-dialog-cor{border:1px solid #f3d5e5;border-radius:22px;box-shadow:0 25px 80px #40233835;padding:23px;max-width:min(440px,calc(100vw - 32px));width:100%;color:#3f3440;background:#fff;position:fixed}
+.ane-dialog-cor::backdrop{background:rgba(36,20,34,.38)}
+.ane-modal-cabecalho{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.ane-modal-cabecalho h2{margin:0}
+.ane-dialog-cor .ane-fechar{width:36px;height:36px;font-size:25px;line-height:1;background:#fff3f8;color:#8a1c58;margin:0;padding:0}
+.ane-preview-linha{display:flex;align-items:center;gap:12px;padding:14px;background:#fff8fb;border-radius:14px;margin:12px 0}
+.ane-preview-cor{width:42px;height:42px;display:inline-block;border-radius:12px;border:1px solid #0001}
+.ane-grade-cores{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin:12px 0 18px}
+.ane-dialog-cor .ane-cor-amostra{height:43px;width:100%;padding:0;margin:0;border-radius:11px;border:2px solid transparent}
+.ane-cor-amostra[aria-pressed=true]{outline:2px solid #663650;outline-offset:2px}
+.ane-dialog-cor input[type=color]{width:100%;height:46px;padding:4px;cursor:pointer}
+.ane-acoes-cor{display:flex;gap:12px}.ane-acoes-cor button{flex:1}
+</style>
 </head>
 <body>
 <div id="appAuth"><div class="login-panel"><div class="brand-mark">A<span>·</span></div><h1>Ane Finance</h1><p>Seu espaço financeiro, privado e sincronizado.</p>
@@ -1147,7 +1160,36 @@ function renderCategorias(){let lista=document.getElementById('catLista');if(!li
 function adicionarCategoria(){let nome=catNormal(document.getElementById('catNome').value),pai=document.getElementById('catPai').value,cor=document.getElementById('catCor').value;if(!nome||nome.length>60)return alert('Informe um nome válido com até 60 caracteres.');if(categorias.some(x=>x.toLocaleLowerCase('pt-BR')===nome.toLocaleLowerCase('pt-BR')))return alert('Essa categoria já existe.');categorias.push(nome);detalhesCategorias[nome]={pai,cor};document.getElementById('catNome').value='';popularCategorias();salvar();atualizar();}
 function renomearCategoria(i){let anterior=categorias[i];if(!anterior)return;let nome=catNormal(prompt('Novo nome da categoria:',anterior));if(!nome||nome===anterior)return;if(nome.length>60||categorias.some(c=>c.toLocaleLowerCase('pt-BR')===nome.toLocaleLowerCase('pt-BR')))return alert('Nome inválido ou já utilizado.');if(!confirm('Atualizar também todas as transações, contas e orçamentos com a categoria antiga?'))return;categorias[i]=nome;detalhesCategorias[nome]=detalhesCategorias[anterior]||{};delete detalhesCategorias[anterior];Object.values(detalhesCategorias).forEach(d=>{if(d.pai===anterior)d.pai=nome});[comprasCartao,lancamentos,movBancos,orcamentos,contasFixas,contasPagar,previaImportacao].forEach(arr=>arr.forEach(o=>{if(o.categoria===anterior)o.categoria=nome}));regrasCategorias.forEach(r=>{if(r.categoria===anterior)r.categoria=nome});popularCategorias();salvar();atualizar();}
 function excluirCategoria(i){let nome=categorias[i];if(!nome)return;let uso=usoCategoria(nome),filhos=Object.values(detalhesCategorias).filter(d=>d.pai===nome).length;if(uso||filhos)return alert('Esta categoria tem '+uso+' vínculos e '+filhos+' subcategorias. Reclassifique ou renomeie antes de excluir.');if(!confirm('Excluir a categoria '+nome+'?'))return;categorias.splice(i,1);delete detalhesCategorias[nome];if(!categorias.length)categorias=['Outros'];popularCategorias();salvar();atualizar();}
-function editarCorCategoria(i){let nome=categorias[i];if(!nome)return;let cor=prompt('Informe uma cor hexadecimal (#RRGGBB):',detalhesCategorias[nome]?.cor||'#b74779');if(!/^#[0-9a-f]{6}$/i.test(cor||''))return alert('Cor inválida. Use #RRGGBB.');detalhesCategorias[nome]={...(detalhesCategorias[nome]||{}),cor};salvar();renderCategorias();}
+const PALETA_ANE=['#e7549b','#b74779','#d8a7c8','#b39ddb','#8fa8e8','#81c7be','#a6c98a','#e8bb78','#e69a8d','#9b91a4','#f1a1ba','#6b92ae'];
+let corCategoriaEditada=null;
+function editarCorCategoria(i){
+ const nome=categorias[i];if(!nome)return;
+ corCategoriaEditada=nome;
+ const cor=detalhesCategorias[nome]?.cor||'#b74779';
+ const modal=document.getElementById('aneModalCor');
+ document.getElementById('aneNomeCor').textContent=nome;
+ document.getElementById('aneCorPicker').value=/^#[0-9a-f]{6}$/i.test(cor)?cor:'#b74779';
+ atualizarPreviaCor();modal.showModal();
+}
+function atualizarPreviaCor(){
+ const cor=document.getElementById('aneCorPicker').value;
+ document.getElementById('anePreviaCor').style.backgroundColor=cor;
+ document.getElementById('aneHexCor').textContent=cor.toUpperCase();
+ document.querySelectorAll('.ane-cor-amostra').forEach(b=>{b.setAttribute('aria-pressed',String(b.dataset.cor.toLowerCase()===cor.toLowerCase()));});
+}
+function escolherCorAne(cor){document.getElementById('aneCorPicker').value=cor;atualizarPreviaCor();}
+function salvarCorCategoria(){
+ if(!corCategoriaEditada||!categorias.includes(corCategoriaEditada))return;
+ const cor=document.getElementById('aneCorPicker').value;
+ detalhesCategorias[corCategoriaEditada]={...(detalhesCategorias[corCategoriaEditada]||{}),cor};
+ salvar();renderCategorias();document.getElementById('aneModalCor').close();corCategoriaEditada=null;
+}
+function iniciarPaletaAne(){
+ const alvo=document.getElementById('aneGradeCores');if(!alvo)return;
+ alvo.innerHTML='';PALETA_ANE.forEach(c=>{const b=document.createElement('button');b.type='button';b.className='ane-cor-amostra';b.dataset.cor=c;b.style.backgroundColor=c;b.title=c;b.setAttribute('aria-label','Escolher cor '+c);b.addEventListener('click',()=>escolherCorAne(c));alvo.appendChild(b);});
+ document.getElementById('aneCorPicker').addEventListener('input',atualizarPreviaCor);
+}
+
 function adicionarRegraCategoria(){let texto=catNormal(document.getElementById('catRegraTexto').value),categoria=document.getElementById('catRegraCategoria').value;if(texto.length<2||!categorias.includes(categoria))return alert('Informe pelo menos dois caracteres e uma categoria.');let r=regrasCategorias.find(x=>x.texto.toLowerCase()===texto.toLowerCase());if(r)r.categoria=categoria;else regrasCategorias.unshift({texto,categoria});document.getElementById('catRegraTexto').value='';salvar();renderCategorias();}
 function removerRegraCategoria(i){regrasCategorias.splice(i,1);salvar();renderCategorias();}
 
@@ -1225,7 +1267,16 @@ async function sairAne(){
  await aneClient.auth.signOut();ANE_KEYS.forEach(k=>localStorage.removeItem(k));location.reload();
 }
 
+iniciarPaletaAne();
 iniciarPWA();
 </script>
+<dialog id="aneModalCor" class="ane-dialog-cor" aria-labelledby="aneTituloCor">
+ <div class="ane-modal-cabecalho"><div><h2 id="aneTituloCor">Cor da categoria</h2><p class="note" id="aneNomeCor"></p></div><button type="button" class="ane-fechar" onclick="document.getElementById('aneModalCor').close()" aria-label="Fechar">×</button></div>
+ <div class="ane-preview-linha"><span id="anePreviaCor" class="ane-preview-cor"></span><span id="aneHexCor">#B74779</span></div>
+ <p class="note">Escolha uma cor da paleta ou personalize abaixo.</p>
+ <div id="aneGradeCores" class="ane-grade-cores"></div>
+ <label for="aneCorPicker">Cor personalizada</label><input id="aneCorPicker" type="color" value="#b74779" aria-label="Selecionar cor personalizada">
+ <div class="ane-acoes-cor"><button type="button" class="btn-light" onclick="document.getElementById('aneModalCor').close()">Cancelar</button><button type="button" onclick="salvarCorCategoria()">Salvar cor</button></div>
+</dialog>
 </body>
 </html>
