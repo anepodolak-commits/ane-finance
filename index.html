@@ -420,7 +420,7 @@ table{font-size:12px}th{background:#faf7f9;color:#81717c;font-size:10px;letter-s
 </div>
 
 <div class="card col-8">
-<h2>Contas fixas cadastradas</h2>
+<h2>Contas fixas cadastradas</h2><div class="kpi" style="margin:12px 0"><b>Total mensal previsto — <span id="fixasTotalMesRotulo"></span></b><div id="fixasTotalMes">R$ 0,00</div><small id="fixasTotalQtd"></small></div>
 <table>
 <thead><tr><th>Descrição</th><th>Categoria</th><th>Vencimento</th><th>Valor</th><th>Banco</th><th></th></tr></thead>
 <tbody id="tabelaFixas"></tbody>
@@ -428,7 +428,7 @@ table{font-size:12px}th{background:#faf7f9;color:#81717c;font-size:10px;letter-s
 </div>
 
 <div class="card col-12">
-<h2>Agenda de contas fixas do mês</h2>
+<h2>Agenda de contas fixas do mês</h2><p class="note">Os valores deste mês podem ser alterados em Contas a pagar sem mudar o cadastro fixo dos meses seguintes.</p>
 <div id="agendaFixas" class="mini-list"></div>
 </div>
 </div>
@@ -495,6 +495,7 @@ let previaImportacao=[];
 function moeda(v){return (Number(v)||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});}
 function mesAtual(){return new Date().toISOString().slice(0,7);}
 let investimentos=[];
+let ajustesFixas={};
 function invEsc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function invN(v){return Math.round((Number(v)||0)*100)/100;}
 function invCalculos(ap){const regs=(ap.registros||[]).slice().sort((a,b)=>a.mes.localeCompare(b.mes));return regs.map((r,i)=>({...r,rendimento:i===0?0:invN(r.saldo-regs[i-1].saldo-r.aporte+r.retirada)}));}
@@ -519,6 +520,7 @@ localStorage.setItem("ane_bancos",JSON.stringify(bancos));
 localStorage.setItem("ane_mov_bancos",JSON.stringify(movBancos));
 localStorage.setItem("ane_orcamentos",JSON.stringify(orcamentos));
 localStorage.setItem("ane_contas_fixas",JSON.stringify(contasFixas));
+localStorage.setItem("ane_ajustes_fixas",JSON.stringify(ajustesFixas));
 localStorage.setItem("ane_contas_pagar",JSON.stringify(contasPagar));
 localStorage.setItem("ane_faturas_oficiais",JSON.stringify(faturasOficiais));
 localStorage.setItem("ane_pagamentos",JSON.stringify(pagamentos));
@@ -854,12 +856,17 @@ function salvarContaFixa(){
 }
 
 function excluirContaFixa(id){
+  if(!confirm("Excluir esta conta fixa e seus ajustes mensais?"))return;
   contasFixas=contasFixas.filter(f=>f.id!==id);
+  Object.keys(ajustesFixas).filter(k=>k.startsWith(String(id)+":")).forEach(k=>delete ajustesFixas[k]);
   salvar();atualizar();
 }
 
 function renderContasFixas(mes){
   if(!document.getElementById("tabelaFixas")) return;
+  document.getElementById('fixasTotalMesRotulo').textContent=mes;
+  document.getElementById('fixasTotalMes').textContent=moeda(contasFixas.reduce((t,f)=>t+fixaValorMes(f,mes),0));
+  document.getElementById('fixasTotalQtd').textContent=contasFixas.length+' conta(s) fixa(s)';
   document.getElementById("tabelaFixas").innerHTML=contasFixas.map(f=>{
     let banco=bancos.find(b=>String(b.id)===String(f.bancoId));
     return "<tr><td>"+f.descricao+"</td><td><span class='badge'>"+f.categoria+"</span></td><td>Dia "+f.dia+"</td><td>"+moeda(f.valor)+"</td><td>"+(banco?banco.nome:"-")+"</td><td><button class='btn-danger' onclick='excluirContaFixa("+f.id+")'>X</button></td></tr>";
@@ -870,7 +877,7 @@ function renderContasFixas(mes){
   let agenda=contasFixas.slice().sort((a,b)=>a.dia-b.dia).map(f=>{
     let data=new Date(ano,mesNum-1,Math.min(f.dia,28));
     let banco=bancos.find(b=>String(b.id)===String(f.bancoId));
-    return "<div class='mini-item'><span><b>Dia "+String(f.dia).padStart(2,"0")+" — "+f.descricao+"</b><br><small>"+f.categoria+" • "+(banco?banco.nome:"sem banco")+"</small></span><span>"+moeda(f.valor)+"</span></div>";
+    return "<div class='mini-item'><span><b>Dia "+String(f.dia).padStart(2,"0")+" — "+f.descricao+"</b><br><small>"+f.categoria+" • "+(banco?banco.nome:"sem banco")+"</small></span><span>"+moeda(fixaValorMes(f,mes))+"</span></div>";
   }).join("");
   document.getElementById("agendaFixas").innerHTML=agenda || "<p class='note'>Nenhuma conta fixa cadastrada.</p>";
 }
@@ -887,7 +894,7 @@ function renderExtrasFinanceiros(mes,dm){
 
   let proximosMeses=[1,2,3].map(n=>mesAdd(mes,n));
   let faturasFuturas=comprasCartao.filter(c=>proximosMeses.includes(c.mesFatura)).reduce((s,c)=>s+c.valor,0);
-  let fixasMes=contasFixas.reduce((s,f)=>s+f.valor,0);
+  let fixasMes=contasFixas.reduce((s,f)=>s+fixaValorMes(f,mes),0);
 
   if(document.getElementById("dashPorDia")) document.getElementById("dashPorDia").innerText=moeda(porDia);
   if(document.getElementById("dashCategoriaVila")) document.getElementById("dashCategoriaVila").innerText=top ? top[0]+" "+moeda(top[1]) : "-";
@@ -915,7 +922,7 @@ function renderExtrasFinanceiros(mes,dm){
 
   if(document.getElementById("proximosVencimentos")){
     let lista=contasFixas.slice().sort((a,b)=>a.dia-b.dia).slice(0,6).map(f=>{
-      return "<div class='mini-item'><span>Dia "+String(f.dia).padStart(2,"0")+" — "+f.descricao+"</span><span>"+moeda(f.valor)+"</span></div>";
+      return "<div class='mini-item'><span>Dia "+String(f.dia).padStart(2,"0")+" — "+f.descricao+"</span><span>"+moeda(fixaValorMes(f,mes))+"</span></div>";
     }).join("");
     document.getElementById("proximosVencimentos").innerHTML=lista || "<p class='note'>Sem contas fixas cadastradas.</p>";
   }
@@ -923,7 +930,7 @@ function renderExtrasFinanceiros(mes,dm){
 
 function limparSistemaCompleto(){
   if(!confirm("Tem certeza que deseja zerar todos os dados do Controle Financeiro da Ane?")) return;
-  ["ane_config","ane_cartoes","ane_compras_cartao","ane_lancamentos","ane_bancos","ane_mov_bancos","ane_orcamentos","ane_contas_fixas","ane_categorias","ane_cat_detalhes","ane_cat_regras","ane_contas_pagar","ane_faturas_oficiais","ane_pagamentos","ane_investimentos"].forEach(k=>localStorage.removeItem(k));
+  ["ane_config","ane_cartoes","ane_compras_cartao","ane_lancamentos","ane_bancos","ane_mov_bancos","ane_orcamentos","ane_contas_fixas","ane_categorias","ane_cat_detalhes","ane_cat_regras","ane_contas_pagar","ane_faturas_oficiais","ane_pagamentos","ane_investimentos","ane_ajustes_fixas"].forEach(k=>localStorage.removeItem(k));
   config={saldoAnterior:0,meta:0};
   cartoes=[];
   comprasCartao=[];
@@ -932,13 +939,13 @@ function limparSistemaCompleto(){
   movBancos=[];
   orcamentos=[];
   contasFixas=[];
-  contasPagar=[];faturasOficiais=[];pagamentos=[];investimentos=[];
+  contasPagar=[];faturasOficiais=[];pagamentos=[];investimentos=[];ajustesFixas={};
   categorias=categoriasPadrao.slice();detalhesCategorias={};regrasCategorias=[];
   popularCategorias();salvar();atualizar();
 }
 
-function baixarBackup(){let blob=new Blob([JSON.stringify({config,cartoes,comprasCartao,lancamentos,bancos,movBancos,orcamentos,contasFixas,contasPagar,faturasOficiais,pagamentos,categorias,detalhesCategorias,regrasCategorias,investimentos},null,2)],{type:"application/json"});let a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="backup-controle-financeiro.json";a.click();}
-function restaurarBackup(){try{let b=JSON.parse(document.getElementById("backupTexto").value);config=b.config||config;cartoes=b.cartoes||[];comprasCartao=b.comprasCartao||[];lancamentos=b.lancamentos||[];bancos=b.bancos||[];movBancos=b.movBancos||[];orcamentos=b.orcamentos||[];contasFixas=b.contasFixas||[];contasPagar=b.contasPagar||[];faturasOficiais=b.faturasOficiais||[];pagamentos=b.pagamentos||[];investimentos=b.investimentos||[];categorias=Array.isArray(b.categorias)&&b.categorias.length?b.categorias:categoriasPadrao.slice();detalhesCategorias=b.detalhesCategorias||{};regrasCategorias=b.regrasCategorias||[];popularCategorias();salvar();atualizar();alert("Backup restaurado. Aguarde a mensagem de sincronização na barra lateral.");}catch(e){alert("Backup inválido.");}}
+function baixarBackup(){let blob=new Blob([JSON.stringify({config,cartoes,comprasCartao,lancamentos,bancos,movBancos,orcamentos,contasFixas,contasPagar,faturasOficiais,pagamentos,categorias,detalhesCategorias,regrasCategorias,investimentos,ajustesFixas},null,2)],{type:"application/json"});let a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="backup-controle-financeiro.json";a.click();}
+function restaurarBackup(){try{let b=JSON.parse(document.getElementById("backupTexto").value);config=b.config||config;cartoes=b.cartoes||[];comprasCartao=b.comprasCartao||[];lancamentos=b.lancamentos||[];bancos=b.bancos||[];movBancos=b.movBancos||[];orcamentos=b.orcamentos||[];contasFixas=b.contasFixas||[];contasPagar=b.contasPagar||[];faturasOficiais=b.faturasOficiais||[];pagamentos=b.pagamentos||[];investimentos=b.investimentos||[];ajustesFixas=b.ajustesFixas||{};categorias=Array.isArray(b.categorias)&&b.categorias.length?b.categorias:categoriasPadrao.slice();detalhesCategorias=b.detalhesCategorias||{};regrasCategorias=b.regrasCategorias||[];popularCategorias();salvar();atualizar();alert("Backup restaurado. Aguarde a mensagem de sincronização na barra lateral.");}catch(e){alert("Backup inválido.");}}
 function exportarCSV(){let linhas=[["tipo","data_mes","cartao","descricao","categoria","parcela","valor"]];lancamentos.forEach(l=>linhas.push([l.tipo,l.data,"",l.descricao,l.categoria,"",l.valor]));comprasCartao.forEach(c=>{let card=cartoes.find(x=>x.id===c.cartaoId);linhas.push(["cartao",c.mesFatura,card?card.nome:"",c.descricao,c.categoria,c.parcelaAtual+"/"+c.parcelas,c.valor]);});movBancos.forEach(m=>{let banco=bancos.find(b=>b.id===m.bancoId);linhas.push(["banco",m.data,banco?banco.nome:"",m.descricao,m.categoria,m.tipo,m.valor]);});let csv=linhas.map(r=>r.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(";")).join("\n");let blob=new Blob([csv],{type:"text/csv;charset=utf-8"});let a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="controle-financeiro.csv";a.click();}
 function limparTudoMes(){let mes=mesSelecionado();if(!confirm("Limpar todos os lançamentos e faturas do mês selecionado?"))return;lancamentos=lancamentos.filter(l=>(l.data||"").slice(0,7)!==mes);comprasCartao=comprasCartao.filter(c=>c.mesFatura!==mes);salvar();atualizar();}
 
@@ -946,9 +953,29 @@ function limparTudoMes(){let mes=mesSelecionado();if(!confirm("Limpar todos os l
 // Pagamentos: pendências separadas da competência de gastos; lançamentos de banco vinculados ao pagamento.
 function payId(){return Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,9);}
 function payData(mes,dia){let [y,m]=mes.split('-').map(Number);return mes+'-'+String(Math.min(Math.max(1,Number(dia)||1),new Date(y,m,0).getDate())).padStart(2,'0');}
+function fixaChaveMes(id,mes){return String(id)+':'+mes;}
+function fixaValorMes(f,mes){const v=ajustesFixas[fixaChaveMes(f.id,mes)];return v===undefined?Number(f.valor)||0:Number(v);}
+function editarValorFixaMes(id,mes){
+ const f=contasFixas.find(x=>String(x.id)===String(id));if(!f)return;
+ const chave='fx:'+id+':'+mes;
+ if(pagamentos.some(p=>p.chave===chave))return alert('Esta conta já foi paga. Para mudar o valor previsto, desfaça o pagamento primeiro.');
+ const atual=fixaValorMes(f,mes);
+ const bruto=prompt('Valor desta conta em '+mes+' (somente neste mês, em R$):',String(atual.toFixed(2)).replace('.',','));
+ if(bruto===null)return;
+ const normal=String(bruto).trim().replace(/\s|R\$/g,'').replace(/\./g,'').replace(',','.');
+ const valor=Number(normal);
+ if(!normal||!Number.isFinite(valor)||valor<0)return alert('Informe um valor válido, igual ou maior que zero.');
+ ajustesFixas[fixaChaveMes(id,mes)]=Math.round(valor*100)/100;
+ salvar();atualizar();
+}
+function restaurarValorFixaMes(id,mes){
+ const chave='fx:'+id+':'+mes;
+ if(pagamentos.some(p=>p.chave===chave))return alert('Desfaça o pagamento antes de restaurar o valor.');
+ delete ajustesFixas[fixaChaveMes(id,mes)];salvar();atualizar();
+}
 function payItens(mes){
  let itens=contasPagar.filter(x=>x.vencimento?.slice(0,7)===mes).map(x=>({...x,chave:'av:'+x.id,tipo:'Avulsa'}));
- contasFixas.forEach(x=>itens.push({chave:'fx:'+x.id+':'+mes,descricao:x.descricao,valor:Number(x.valor)||0,vencimento:payData(mes,x.dia),categoria:x.categoria,tipo:'Fixa'}));
+ contasFixas.forEach(x=>itens.push({chave:'fx:'+x.id+':'+mes,descricao:x.descricao,valor:fixaValorMes(x,mes),vencimento:payData(mes,x.dia),categoria:x.categoria,tipo:'Fixa'}));
  cartoes.forEach(c=>{
   const registro=faturasOficiais.find(f=>String(f.cartaoId)===String(c.id)&&f.mes===mes);
   const total=comprasCartao.filter(x=>String(x.cartaoId)===String(c.id)&&x.mesFatura===mes).reduce((a,x)=>a+Number(x.valor||0),0);
@@ -962,7 +989,7 @@ function registrarFatura(){let cartaoId=document.getElementById('payCartao').val
 function registrarPagamento(chave){let mes=document.getElementById('payMesFiltro').value||mesAtual(),item=payItens(mes).find(x=>x.chave===chave);if(!item||item.pagamento)return;let data=prompt('Data do pagamento (AAAA-MM-DD):',new Date().getFullYear()+'-'+String(new Date().getMonth()+1).padStart(2,'0')+'-'+String(new Date().getDate()).padStart(2,'0'));if(data===null)return;if(!/^\d{4}-\d{2}-\d{2}$/.test(data)||Number.isNaN(new Date(data+'T12:00:00').getTime()))return alert('Data inválida.');let bruto=prompt('Valor efetivamente pago (R$):',String(item.valor.toFixed(2)).replace('.',','));if(bruto===null)return;let valor=Number(bruto.replace(/\./g,'').replace(',','.'));if(!(valor>0))return alert('Valor inválido.');let opcoes=bancos.map((b,i)=>(i+1)+' — '+b.nome).join('\n');let bancoId='';if(bancos.length){let n=prompt('Conta utilizada (número):\n0 — Sem conta bancária\n'+opcoes,'1');if(n===null)return;let idx=Number(n)-1;if(n!=='0'&&!bancos[idx])return alert('Banco inválido.');bancoId=n==='0'?'':String(bancos[idx].id);}let detalhe=prompt('Observação / comprovante (opcional):','');if(detalhe===null)return;let movimentoId=null;if(bancoId){movimentoId=payId();movBancos.push({id:movimentoId,bancoId:Number(bancoId),data,descricao:'Pagamento — '+item.descricao,valor,tipo:'saida',categoria:item.tipo==='Cartão'?'Pagamento de fatura':item.categoria||'Outros',pagamentoRef:chave});}pagamentos.push({id:payId(),chave,data,valor,bancoId,movimentoId,descricao:item.descricao,detalhe});salvar();atualizar();}
 function desfazerPagamento(chave){let p=pagamentos.find(x=>x.chave===chave);if(!p||!confirm('Desfazer este pagamento? A movimentação bancária vinculada também será excluída.'))return;pagamentos=pagamentos.filter(x=>x.chave!==chave);if(p.movimentoId)movBancos=movBancos.filter(x=>String(x.id)!==String(p.movimentoId));salvar();atualizar();}
 function excluirContaPagar(id){if(!confirm('Excluir esta conta?'))return;contasPagar=contasPagar.filter(x=>String(x.id)!==String(id));salvar();atualizar();}
-function renderPagamentos(){const el=document.getElementById('payTabela');if(!el)return;let filtro=document.getElementById('payMesFiltro'),mes=filtro.value||mesSelecionado();if(!filtro.value)filtro.value=mes;let cat=document.getElementById('payCategoria');if(!cat.options.length)cat.innerHTML=categorias.map(x=>'<option>'+htmlSeguro(x)+'</option>').join('');let sel=document.getElementById('payCartao'),ant=sel.value;sel.innerHTML='<option value="">Selecione</option>'+cartoes.map(c=>'<option value="'+c.id+'">'+htmlSeguro(c.nome)+'</option>').join('');sel.value=ant;let mesFat=document.getElementById('payMesFatura');if(!mesFat.value)mesFat.value=mes;let itens=payItens(mes),hoje=new Date().getFullYear()+'-'+String(new Date().getMonth()+1).padStart(2,'0')+'-'+String(new Date().getDate()).padStart(2,'0'), aberto=itens.filter(x=>!x.pagamento),pagos=itens.filter(x=>x.pagamento);document.getElementById('payAberto').textContent=moeda(aberto.reduce((a,x)=>a+x.valor,0));document.getElementById('payPago').textContent=moeda(pagos.reduce((a,x)=>a+x.pagamento.valor,0));document.getElementById('payVencido').textContent=moeda(aberto.filter(x=>x.vencimento<hoje).reduce((a,x)=>a+x.valor,0));document.getElementById('payQuantidade').textContent=String(aberto.length);document.getElementById('payPeriodoLabel').textContent=mes;let status=document.getElementById('payStatusFiltro').value,busca=document.getElementById('payBusca').value.toLowerCase();itens=itens.filter(x=>(status==='todos'||(status==='pago'&&x.pagamento)||(status==='pendente'&&!x.pagamento)||(status==='vencido'&&!x.pagamento&&x.vencimento<hoje))&&x.descricao.toLowerCase().includes(busca));el.innerHTML=itens.map(x=>{let flag=x.pagamento?'Pago':x.vencimento<hoje?'Vencido':'Pendente';let label=x.diferenca!==null&&x.diferenca!==undefined&&Math.abs(x.diferenca)>0.009?'<small style="display:block;color:#9d667d">Diferença da soma das compras: '+moeda(x.diferenca)+'</small>':'';return '<tr><td>'+x.vencimento+'</td><td><b>'+htmlSeguro(x.descricao)+'</b>'+label+'</td><td>'+x.tipo+'</td><td>'+moeda(x.valor)+'</td><td><span class="pay-chip '+(x.pagamento?'paid':x.vencimento<hoje?'late':'')+'">'+flag+'</span></td><td>'+(x.pagamento?htmlSeguro(x.pagamento.data)+' · '+moeda(x.pagamento.valor):'—')+'</td><td><div class="pay-actions">'+(x.pagamento?'<button class="btn-light" onclick="desfazerPagamento(\''+x.chave+'\')">Desfazer</button>':'<button onclick="registrarPagamento(\''+x.chave+'\')">✓ Marcar pago</button>')+(x.tipo==='Avulsa'&&!x.pagamento?'<button class="btn-light" onclick="excluirContaPagar(\''+x.id+'\')">Excluir</button>':'')+'</div></td></tr>';}).join('')||'<tr><td colspan="7">Nenhuma conta para esses filtros.</td></tr>';document.getElementById('payHistorico').innerHTML=pagamentos.slice().sort((a,b)=>b.data.localeCompare(a.data)).slice(0,100).map(p=>{let b=bancos.find(x=>String(x.id)===String(p.bancoId));return '<tr><td>'+htmlSeguro(p.data)+'</td><td>'+htmlSeguro(p.descricao)+'</td><td>'+htmlSeguro(b?.nome||'Não informado')+'</td><td>'+moeda(p.valor)+'</td><td>'+htmlSeguro(p.detalhe||'—')+'</td></tr>';}).join('')||'<tr><td colspan="5">Nenhum pagamento registrado.</td></tr>';}
+function renderPagamentos(){const el=document.getElementById('payTabela');if(!el)return;let filtro=document.getElementById('payMesFiltro'),mes=filtro.value||mesSelecionado();if(!filtro.value)filtro.value=mes;let cat=document.getElementById('payCategoria');if(!cat.options.length)cat.innerHTML=categorias.map(x=>'<option>'+htmlSeguro(x)+'</option>').join('');let sel=document.getElementById('payCartao'),ant=sel.value;sel.innerHTML='<option value="">Selecione</option>'+cartoes.map(c=>'<option value="'+c.id+'">'+htmlSeguro(c.nome)+'</option>').join('');sel.value=ant;let mesFat=document.getElementById('payMesFatura');if(!mesFat.value)mesFat.value=mes;let itens=payItens(mes),hoje=new Date().getFullYear()+'-'+String(new Date().getMonth()+1).padStart(2,'0')+'-'+String(new Date().getDate()).padStart(2,'0'), aberto=itens.filter(x=>!x.pagamento),pagos=itens.filter(x=>x.pagamento);document.getElementById('payAberto').textContent=moeda(aberto.reduce((a,x)=>a+x.valor,0));document.getElementById('payPago').textContent=moeda(pagos.reduce((a,x)=>a+x.pagamento.valor,0));document.getElementById('payVencido').textContent=moeda(aberto.filter(x=>x.vencimento<hoje).reduce((a,x)=>a+x.valor,0));document.getElementById('payQuantidade').textContent=String(aberto.length);document.getElementById('payPeriodoLabel').textContent=mes;let status=document.getElementById('payStatusFiltro').value,busca=document.getElementById('payBusca').value.toLowerCase();itens=itens.filter(x=>(status==='todos'||(status==='pago'&&x.pagamento)||(status==='pendente'&&!x.pagamento)||(status==='vencido'&&!x.pagamento&&x.vencimento<hoje))&&x.descricao.toLowerCase().includes(busca));el.innerHTML=itens.map(x=>{let flag=x.pagamento?'Pago':x.vencimento<hoje?'Vencido':'Pendente';let label=x.diferenca!==null&&x.diferenca!==undefined&&Math.abs(x.diferenca)>0.009?'<small style="display:block;color:#9d667d">Diferença da soma das compras: '+moeda(x.diferenca)+'</small>':'';return '<tr><td>'+x.vencimento+'</td><td><b>'+htmlSeguro(x.descricao)+'</b>'+label+'</td><td>'+x.tipo+'</td><td>'+moeda(x.valor)+'</td><td><span class="pay-chip '+(x.pagamento?'paid':x.vencimento<hoje?'late':'')+'">'+flag+'</span></td><td>'+(x.pagamento?htmlSeguro(x.pagamento.data)+' · '+moeda(x.pagamento.valor):'—')+'</td><td><div class="pay-actions">'+(x.pagamento?'<button class="btn-light" onclick="desfazerPagamento(\''+x.chave+'\')">Desfazer</button>':'<button onclick="registrarPagamento(\''+x.chave+'\')">✓ Marcar pago</button>')+(x.tipo==='Fixa'&&!x.pagamento?'<button class="btn-light" onclick="editarValorFixaMes(\''+x.chave.split(':')[1]+'\',\''+mes+'\')">Editar valor</button>'+(Object.prototype.hasOwnProperty.call(ajustesFixas,fixaChaveMes(x.chave.split(':')[1],mes))?'<button class="btn-light" onclick="restaurarValorFixaMes(\''+x.chave.split(':')[1]+'\',\''+mes+'\')">Valor padrão</button>':''):'')+(x.tipo==='Avulsa'&&!x.pagamento?'<button class="btn-light" onclick="excluirContaPagar(\''+x.id+'\')">Excluir</button>':'')+'</div></td></tr>';}).join('')||'<tr><td colspan="7">Nenhuma conta para esses filtros.</td></tr>';document.getElementById('payHistorico').innerHTML=pagamentos.slice().sort((a,b)=>b.data.localeCompare(a.data)).slice(0,100).map(p=>{let b=bancos.find(x=>String(x.id)===String(p.bancoId));return '<tr><td>'+htmlSeguro(p.data)+'</td><td>'+htmlSeguro(p.descricao)+'</td><td>'+htmlSeguro(b?.nome||'Não informado')+'</td><td>'+moeda(p.valor)+'</td><td>'+htmlSeguro(p.detalhe||'—')+'</td></tr>';}).join('')||'<tr><td colspan="5">Nenhum pagamento registrado.</td></tr>';}
 
 // Importação e revisão de faturas: sem envio dos documentos ao servidor.
 function htmlSeguro(v){return String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));}
@@ -1194,15 +1221,15 @@ function adicionarRegraCategoria(){let texto=catNormal(document.getElementById('
 function removerRegraCategoria(i){regrasCategorias.splice(i,1);salvar();renderCategorias();}
 
 
-const ANE_FIELDS=['config','cartoes','comprasCartao','lancamentos','bancos','movBancos','orcamentos','contasFixas','contasPagar','faturasOficiais','pagamentos','categorias','detalhesCategorias','regrasCategorias','investimentos'];
-const ANE_KEYS=['ane_config','ane_cartoes','ane_compras_cartao','ane_lancamentos','ane_bancos','ane_mov_bancos','ane_orcamentos','ane_contas_fixas','ane_contas_pagar','ane_faturas_oficiais','ane_pagamentos','ane_categorias','ane_cat_detalhes','ane_cat_regras','ane_investimentos'];
+const ANE_FIELDS=['config','cartoes','comprasCartao','lancamentos','bancos','movBancos','orcamentos','contasFixas','contasPagar','faturasOficiais','pagamentos','categorias','detalhesCategorias','regrasCategorias','investimentos','ajustesFixas'];
+const ANE_KEYS=['ane_config','ane_cartoes','ane_compras_cartao','ane_lancamentos','ane_bancos','ane_mov_bancos','ane_orcamentos','ane_contas_fixas','ane_contas_pagar','ane_faturas_oficiais','ane_pagamentos','ane_categorias','ane_cat_detalhes','ane_cat_regras','ane_investimentos','ane_ajustes_fixas'];
 let aneClient=null,aneUser=null,aneTimer=null,aneSaving=false,anePending=false,aneLastSent='',aneRemoteUpdated=null;
 window.anePodeSincronizar=false;
-function aneState(){return {config,cartoes,comprasCartao,lancamentos,bancos,movBancos,orcamentos,contasFixas,contasPagar,faturasOficiais,pagamentos,categorias,detalhesCategorias,regrasCategorias,investimentos};}
+function aneState(){return {config,cartoes,comprasCartao,lancamentos,bancos,movBancos,orcamentos,contasFixas,contasPagar,faturasOficiais,pagamentos,categorias,detalhesCategorias,regrasCategorias,investimentos,ajustesFixas};}
 function aneApply(data){
  config=data.config||{saldoAnterior:0,meta:0};cartoes=data.cartoes||[];comprasCartao=data.comprasCartao||[];lancamentos=data.lancamentos||[];
  bancos=data.bancos||[];movBancos=data.movBancos||[];orcamentos=data.orcamentos||[];contasFixas=data.contasFixas||[];
- contasPagar=data.contasPagar||[];faturasOficiais=data.faturasOficiais||[];pagamentos=data.pagamentos||[];investimentos=Array.isArray(data.investimentos)?data.investimentos:[];
+ contasPagar=data.contasPagar||[];faturasOficiais=data.faturasOficiais||[];pagamentos=data.pagamentos||[];investimentos=Array.isArray(data.investimentos)?data.investimentos:[];ajustesFixas=data.ajustesFixas||{};
  categorias=Array.isArray(data.categorias)&&data.categorias.length?data.categorias:categoriasPadrao.slice();
  detalhesCategorias=data.detalhesCategorias||{};regrasCategorias=data.regrasCategorias||[];
  ANE_KEYS.forEach((k,i)=>localStorage.setItem(k,JSON.stringify(aneState()[ANE_FIELDS[i]])));
