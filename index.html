@@ -246,7 +246,7 @@ table{font-size:12px}th{background:#faf7f9;color:#81717c;font-size:10px;letter-s
  <button class="btn-inline btn-light" onclick="limparPrevia()">Limpar prévia</button>
  <div class="info-box" id="impStatus">Selecione um cartão, o mês e o arquivo da fatura.</div>
  <p class="note">Se o PDF pedir senha ao abrir no banco, digite a mesma senha no campo acima. Ela é usada apenas para desbloquear o arquivo nesta leitura e não é armazenada no controle financeiro.</p>
- <p class="note">Para compras parceladas já presentes na fatura, a importação registra apenas a parcela cobrada naquele mês, evitando criar parcelas futuras que poderão vir nas próximas faturas.</p>
+ <p class="note">Compras parceladas serão previstas nos meses seguintes. Na importação da próxima fatura, confira se o valor previsto corresponde ao valor efetivamente cobrado; o app tenta substituir a previsão, sem lançar duplicado.</p>
  </div>
  <div class="card col-12" id="impPreviaBox" style="display:none">
  <div class="section-title"><h2>Revisar lançamentos</h2><span class="badge" id="impResumo"></span></div>
@@ -624,7 +624,23 @@ if(document.getElementById("fixaBanco")){
   document.getElementById("fixaBanco").value=atualFixaBanco;
 }
 renderCartoes(mes);popularCartoesImportacao();renderBancos(mes);renderTabelas(mes);renderGraficos(mes,dm);renderExtrasFinanceiros(mes,dm);renderOrcamentos(mes);renderContasFixas(mes);renderCategorias();renderPagamentos();}
-function renderCartoes(mes){let html="";cartoes.forEach(c=>{let gasto=comprasCartao.filter(x=>x.cartaoId===c.id&&x.mesFatura===mes).reduce((s,x)=>s+x.valor,0);let uso=c.limite>0?Math.min(100,(gasto/c.limite)*100):0;html += "<div class='col-4'><div class='card-credit'><div><h3>"+c.nome+"</h3><div class='limit'>Fecha dia "+(c.fechamento||"-")+" • Vence dia "+(c.vencimento||"-")+"</div></div><div><div class='value'>"+moeda(gasto)+"</div><div class='limit'>Limite: "+moeda(c.limite)+"</div><div class='progress'><span style='width:"+uso+"%'></span></div></div><button class='btn-danger' onclick='excluirCartao("+c.id+")'>Excluir</button></div></div>";});if(!html)html="<p class='note'>Nenhum cartão cadastrado ainda.</p>";document.getElementById("listaCartoes").innerHTML=html;document.getElementById("cardsResumo").innerHTML=html;}
+function limiteDisponivelEstimado(cartao){
+ const id=String(cartao.id),limite=Number(cartao.limite)||0;
+ const compras=comprasCartao.filter(c=>String(c.cartaoId)===id).reduce((s,c)=>s+(Number(c.valor)||0),0);
+ // Apenas pagamentos efetivos de faturas deste cartão liberam o limite disponível.
+ const pagos=pagamentos.filter(p=>String(p.chave||'').startsWith('fc:'+id+':')).reduce((s,p)=>s+(Number(p.valor)||0),0);
+ const usado=Math.max(0,compras-pagos);
+ return {limite,usado,disponivel:Math.max(0,limite-usado)};
+}
+function renderCartoes(mes){
+ let html='';cartoes.forEach(c=>{
+  const gasto=comprasCartao.filter(x=>String(x.cartaoId)===String(c.id)&&x.mesFatura===mes).reduce((s,x)=>s+Number(x.valor||0),0);
+  const saldo=limiteDisponivelEstimado(c),uso=saldo.limite>0?Math.min(100,100*saldo.usado/saldo.limite):0;
+  html+='<div class="col-4"><div class="card-credit"><div><h3>'+htmlSeguro(c.nome)+'</h3><div class="limit">Fecha dia '+(c.fechamento||'-')+' • Vence dia '+(c.vencimento||'-')+'</div></div><div><div class="value">'+moeda(gasto)+'</div><div class="limit">Limite total: '+moeda(saldo.limite)+'</div><div class="limit">Limite usado estimado: '+moeda(saldo.usado)+'</div><div class="limit"><b>Disponível estimado: '+moeda(saldo.disponivel)+'</b></div><small style="display:block;margin:5px 0;color:#775c76">Compras de todos os meses menos faturas pagas registradas no app. Confira com o banco se há histórico anterior.</small><div class="progress"><span style="width:'+uso+'%"></span></div></div><button class="btn-danger" onclick="excluirCartao('+c.id+')">Excluir</button></div></div>';
+ });
+ if(!html)html='<p class="note">Nenhum cartão cadastrado ainda.</p>';
+ document.getElementById('listaCartoes').innerHTML=html;document.getElementById('cardsResumo').innerHTML=html;
+}
 
 function comprasCartaoFiltradas(){
   let modo=document.getElementById("filtroCartaoModo") ? document.getElementById("filtroCartaoModo").value : "mes";
@@ -1146,7 +1162,7 @@ function processarPDFPorPosicao(paginas,mes){
 function chaveImp(x,cartaoId,mes){return [cartaoId,mes,Number(x.valor).toFixed(2),String(x.descricao).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'').trim(),x.data||''].join('|');}
 function jaExisteImp(x){
  let id=Number(document.getElementById('impCartao').value),mes=document.getElementById('impMes').value;
- return comprasCartao.some(c=>chaveImp(c,c.cartaoId,c.mesFatura)===chaveImp(x,id,mes))||previaImportacao.some(y=>y!==x&&y.selecionado&&previaImportacao.indexOf(y)<previaImportacao.indexOf(x)&&chaveImp(y,id,mes)===chaveImp(x,id,mes));
+ return comprasCartao.some(c=>c.origem!=='previsao_importacao'&&chaveImp(c,c.cartaoId,c.mesFatura)===chaveImp(x,id,mes))||previaImportacao.some(y=>y!==x&&y.selecionado&&previaImportacao.indexOf(y)<previaImportacao.indexOf(x)&&chaveImp(y,id,mes)===chaveImp(x,id,mes));
 }
 async function lerFatura(){
  const file=document.getElementById('impArquivo').files[0],mes=document.getElementById('impMes').value,id=document.getElementById('impCartao').value;
@@ -1211,14 +1227,35 @@ function mostrarPrevia(){
  }).join('');
  document.getElementById('impResumo').textContent=`${previaImportacao.length} linhas • ${duplicadas} duplicadas • ${moeda(total)} selecionados`;
 }
+function conferirParcelaExistente(cartaoId,mes,x,parcela){
+ const normalizar=v=>String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+ return comprasCartao.find(c=>String(c.cartaoId)===String(cartaoId)&&c.mesFatura===mes&&c.parcelaAtual===parcela&&c.parcelas===x.parcelas&&Math.abs(Number(c.valor)-Number(x.valor))<0.011&&normalizar(c.descricao)===normalizar(x.descricao));
+}
 function confirmarImportacao(){
- let id=Number(document.getElementById('impCartao').value),mes=document.getElementById('impMes').value;
+ const id=Number(document.getElementById('impCartao').value),mes=document.getElementById('impMes').value;
  if(!cartoes.some(c=>c.id===id)||!/^\d{4}-\d{2}$/.test(mes))return alert('Escolha um cartão e mês válidos.');
- let itens=previaImportacao.filter(x=>x.selecionado&&!jaExisteImp(x)&&x.data&&Number.isFinite(Number(x.valor))&&x.valor>0);
+ // As previsões são substituídas pela parcela real, não devem bloquear uma nova importação.
+ const itens=previaImportacao.filter(x=>x.selecionado&&!jaExisteImp(x)&&x.data&&Number.isFinite(Number(x.valor))&&Number(x.valor)>0);
  if(!itens.length)return alert('Não há compras novas selecionadas.');
- if(!confirm(`Adicionar ${itens.length} lançamentos, total ${moeda(itens.reduce((a,x)=>a+x.valor,0))}, à fatura ${mes}?`))return;
- let stamp=Date.now();itens.forEach((x,i)=>comprasCartao.push({id:stamp+i+1,grupo:stamp+i+1,cartaoId:id,data:x.data,mesFatura:mes,descricao:x.descricao,categoria:x.categoria,parcelaAtual:x.parcelaAtual,parcelas:x.parcelas,valor:Number(x.valor.toFixed(2)),origem:'importacao'}));
- salvar();previaImportacao=[];document.getElementById('impPreviaBox').style.display='none';statusImp(`${itens.length} compras salvas na fatura ${mes}. Confira na aba Cartões.`);atualizar();
+ const quantas=itens.reduce((n,x)=>n+Math.max(0,(Number(x.parcelas)||1)-(Number(x.parcelaAtual)||1)),0);
+ if(!confirm('Importar '+itens.length+' lançamentos e prever até '+quantas+' parcelas futuras? Confira os valores nas próximas faturas para evitar duplicações.'))return;
+ let criadas=0,substituidas=0,stamp=Date.now();
+ itens.forEach((x,i)=>{
+  const atual=Math.max(1,Number(x.parcelaAtual)||1),total=Math.max(atual,Number(x.parcelas)||1),grupo=stamp+i*1000;
+  let existente=conferirParcelaExistente(id,mes,{...x,parcelas:total},atual);
+  if(existente&&existente.origem==='previsao_importacao'){
+   Object.assign(existente,{data:x.data,descricao:x.descricao,categoria:x.categoria,valor:Number(x.valor),origem:'importacao'});substituidas++;
+  }else if(!existente){
+   comprasCartao.push({id:grupo,grupo,cartaoId:id,data:x.data,mesFatura:mes,descricao:x.descricao,categoria:x.categoria,parcelaAtual:atual,parcelas:total,valor:Number(x.valor),origem:'importacao'});criadas++;
+  }
+  for(let n=atual+1;n<=total;n++){
+   const mesSeguinte=mesAdd(mes,n-atual),parcela={...x,parcelas:total};
+   if(conferirParcelaExistente(id,mesSeguinte,parcela,n))continue;
+   comprasCartao.push({id:grupo+n,grupo,cartaoId:id,data:x.data,mesFatura:mesSeguinte,descricao:x.descricao,categoria:x.categoria,parcelaAtual:n,parcelas:total,valor:Number(x.valor),origem:'previsao_importacao'});criadas++;
+  }
+ });
+ salvar();previaImportacao=[];document.getElementById('impPreviaBox').style.display='none';
+ statusImp(criadas+' parcelas registradas; '+substituidas+' previsões substituídas por valores reais. Confira as faturas futuras.');atualizar();
 }
 
 function catNormal(nome){return String(nome||'').trim().replace(/\s+/g,' ');}
