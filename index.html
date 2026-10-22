@@ -633,13 +633,36 @@ function limiteDisponivelEstimado(cartao){
  return {limite,usado,disponivel:Math.max(0,limite-usado)};
 }
 function renderCartoes(mes){
- let html='';cartoes.forEach(c=>{
-  const gasto=comprasCartao.filter(x=>String(x.cartaoId)===String(c.id)&&x.mesFatura===mes).reduce((s,x)=>s+Number(x.valor||0),0);
+ let html='';
+ cartoes.forEach(c=>{
+  const id=String(c.id),chave='fc:'+id+':'+mes;
+  const gasto=comprasCartao.filter(x=>String(x.cartaoId)===id&&x.mesFatura===mes).reduce((v,x)=>v+Number(x.valor||0),0);
+  const oficial=faturasOficiais.find(f=>String(f.cartaoId)===id&&f.mes===mes);
+  const valorFatura=oficial?Number(oficial.valor||0):gasto;
+  const baixa=pagamentos.find(p=>p.chave===chave);
+  const valorPago=baixa?Number(baixa.valor||0):0;
+  const pendente=Math.max(0,valorFatura-valorPago);
+  const pagoIntegral=!!baixa&&pendente<=0.009;
+  const proxMes=mesAdd(mes,1);
+  const proximas=comprasCartao.filter(x=>String(x.cartaoId)===id&&x.mesFatura===proxMes).reduce((v,x)=>v+Number(x.valor||0),0);
+  const futuras=comprasCartao.filter(x=>String(x.cartaoId)===id&&x.mesFatura>mes);
+  const saldoFuturo=futuras.reduce((v,x)=>v+Number(x.valor||0),0);
   const saldo=limiteDisponivelEstimado(c),uso=saldo.limite>0?Math.min(100,100*saldo.usado/saldo.limite):0;
-  html+='<div class="col-4"><div class="card-credit"><div><h3>'+htmlSeguro(c.nome)+'</h3><div class="limit">Fecha dia '+(c.fechamento||'-')+' • Vence dia '+(c.vencimento||'-')+'</div></div><div><div class="value">'+moeda(gasto)+'</div><div class="limit">Limite total: '+moeda(saldo.limite)+'</div><div class="limit">Limite usado estimado: '+moeda(saldo.usado)+'</div><div class="limit"><b>Disponível estimado: '+moeda(saldo.disponivel)+'</b></div><small style="display:block;margin:5px 0;color:#775c76">Compras de todos os meses menos faturas pagas registradas no app. Confira com o banco se há histórico anterior.</small><div class="progress"><span style="width:'+uso+'%"></span></div></div><button class="btn-danger" onclick="excluirCartao('+c.id+')">Excluir</button></div></div>';
+  html+='<div class="col-4"><div class="card-credit">'+
+   '<div><h3>'+htmlSeguro(c.nome)+'</h3><div class="limit">Fecha dia '+(c.fechamento||'-')+' • Vence dia '+(c.vencimento||'-')+'</div></div>'+
+   '<div><small>Em aberto em '+htmlSeguro(mes)+'</small><div class="value">'+moeda(pendente)+'</div>'+
+   (pagoIntegral?'<div class="limit"><b>✓ Fatura paga</b> · '+moeda(valorPago)+'</div>':baixa?'<div class="limit">Pago parcialmente: '+moeda(valorPago)+'</div>':'<div class="limit">'+(valorFatura>0?'Fatura ainda sem baixa':'Sem cobrança neste mês')+'</div>')+
+   '<div class="limit" style="margin-top:10px">Próxima fatura ('+htmlSeguro(proxMes)+'): <b>'+moeda(proximas)+'</b></div>'+
+   '<div class="limit">Parcelas/compras futuras registradas: <b>'+moeda(saldoFuturo)+'</b></div>'+
+   '<div class="limit">Limite total: '+moeda(saldo.limite)+'</div><div class="limit">Limite usado estimado: '+moeda(saldo.usado)+'</div>'+
+   '<div class="limit"><b>Disponível estimado: '+moeda(saldo.disponivel)+'</b></div>'+
+   '<small style="display:block;margin:5px 0;color:#775c76">Próximos meses incluem somente compras já cadastradas. O limite é estimado a partir do histórico existente no aplicativo.</small>'+
+   '<div class="progress"><span style="width:'+uso+'%"></span></div></div>'+
+   '<button class="btn-danger" onclick="excluirCartao('+c.id+')">Excluir</button></div></div>';
  });
  if(!html)html='<p class="note">Nenhum cartão cadastrado ainda.</p>';
- document.getElementById('listaCartoes').innerHTML=html;document.getElementById('cardsResumo').innerHTML=html;
+ document.getElementById('listaCartoes').innerHTML=html;
+ document.getElementById('cardsResumo').innerHTML=html;
 }
 
 function comprasCartaoFiltradas(){
