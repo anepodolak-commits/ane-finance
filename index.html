@@ -994,21 +994,18 @@ function registrarPagamento(chave){
  if(!dlg){
   dlg=document.createElement('div');dlg.id='aneBaixaModal';
   dlg.style.cssText='position:fixed;inset:0;z-index:99999;background:#291a28a6;display:flex;align-items:center;justify-content:center;padding:16px';
-  dlg.innerHTML='<form id="aneBaixaForm" style="width:min(100%,470px);background:white;border-radius:22px;padding:24px;box-shadow:0 20px 70px #0003"><h2>Registrar pagamento</h2><p class="note" id="aneBaixaDesc"></p><label>Data do pagamento</label><input id="aneBaixaData" type="date" required><label>Valor pago (R$)</label><input id="aneBaixaValor" type="number" step="0.01" min="0.01" required><label>Conta bancária utilizada</label><select id="aneBaixaBanco" required></select><label>Observações</label><textarea id="aneBaixaObs" rows="2"></textarea><div style="display:flex;gap:10px"><button class="btn-light" type="button" id="aneBaixaCancelar">Cancelar</button><button type="submit">Confirmar baixa</button></div></form>';
+  dlg.innerHTML='<form id="aneBaixaForm" style="width:min(100%,470px);background:white;border-radius:22px;padding:24px;box-shadow:0 20px 70px #0003"><h2>Registrar pagamento</h2><p class="note" id="aneBaixaDesc"></p><label>Data do pagamento</label><input id="aneBaixaData" type="date" required><label>Valor pago (R$)</label><input id="aneBaixaValor" type="number" step="0.01" min="0.01" required><label>Conta bancária utilizada</label><select id="aneBaixaBanco"></select><label>Observações</label><textarea id="aneBaixaObs" rows="2"></textarea><div style="display:flex;gap:10px"><button class="btn-light" type="button" id="aneBaixaCancelar">Cancelar</button><button type="submit">Confirmar baixa</button></div></form>';
   document.body.appendChild(dlg);
  }
  const form=dlg.querySelector('#aneBaixaForm'),sel=dlg.querySelector('#aneBaixaBanco');
  sel.innerHTML='<option value="">Não vincular a banco</option>'+bancos.map(b=>'<option value="'+String(b.id)+'">'+htmlSeguro(b.nome)+'</option>').join('');
- sel.required=false;
- const hoje=new Date(); dlg.querySelector('#aneBaixaData').value=new Date(hoje.getTime()-hoje.getTimezoneOffset()*60000).toISOString().slice(0,10);
+ const hoje=new Date();dlg.querySelector('#aneBaixaData').value=new Date(hoje.getTime()-hoje.getTimezoneOffset()*60000).toISOString().slice(0,10);
  dlg.querySelector('#aneBaixaDesc').textContent=item.descricao+' • Previsto: '+moeda(item.valor);
- dlg.querySelector('#aneBaixaValor').value=Number(item.valor).toFixed(2);
- dlg.querySelector('#aneBaixaObs').value='';
+ dlg.querySelector('#aneBaixaValor').value=Number(item.valor).toFixed(2);dlg.querySelector('#aneBaixaObs').value='';
  if(item.bancoId&&bancos.some(b=>String(b.id)===String(item.bancoId)))sel.value=String(item.bancoId);
  function fechar(){dlg.style.display='none';document.removeEventListener('keydown',esc);}
  function esc(e){if(e.key==='Escape')fechar();}
- document.addEventListener('keydown',esc);
- dlg.querySelector('#aneBaixaCancelar').onclick=fechar;
+ document.addEventListener('keydown',esc);dlg.querySelector('#aneBaixaCancelar').onclick=fechar;
  dlg.onclick=e=>{if(e.target===dlg)fechar();};
  form.onsubmit=e=>{
   e.preventDefault();
@@ -1018,10 +1015,7 @@ function registrarPagamento(chave){
   if(bancoId&&!bancos.some(b=>String(b.id)===bancoId))return alert('Conta bancária inválida.');
   if(pagamentos.some(p=>p.chave===chave))return alert('Pagamento já registrado.');
   let movimentoId=null;
-  if(bancoId){
-   movimentoId=payId();
-   movBancos.push({id:movimentoId,bancoId:Number(bancoId),data,descricao:'Pagamento — '+item.descricao,valor,tipo:'saida',categoria:item.tipo==='Cartão'?'Pagamento de fatura':item.categoria||'Outros',pagamentoRef:chave});
-  }
+  if(bancoId){movimentoId=payId();movBancos.push({id:movimentoId,bancoId:Number(bancoId),data,descricao:'Pagamento — '+item.descricao,valor,tipo:'saida',categoria:item.tipo==='Cartão'?'Pagamento de fatura':item.categoria||'Outros',pagamentoRef:chave});}
   pagamentos.push({id:payId(),chave,data,valor,bancoId,movimentoId,descricao:item.descricao,detalhe});
   fechar();salvar();atualizar();
  };
@@ -1115,30 +1109,39 @@ function processarTextoPDF(texto,mes){
 // Leitura posicional de PDFs em colunas, em especial o extrato XP.
 // Reconstrói cada linha a partir da posição horizontal e vertical dos trechos do PDF.
 function processarPDFPorPosicao(paginas,mes){
- const saida=[];
- const dataRE=/^\d{2}\/\d{2}\/\d{2,4}$/;
- const valorRE=/[-−]?(?:\d{1,3}(?:\.\d{3})+|\d+),\d{2}/g;
- for(const {items,largura} of paginas){
-  const pedacos=items.filter(it=>it.str&&it.str.trim()).map(it=>({s:it.str.trim(),x:it.transform[4],y:it.transform[5]}));
-  const datas=pedacos.filter(it=>dataRE.test(it.s)&&it.x<largura*.16);
-  for(const cab of datas){
-   // Os trechos da coluna descrição podem ter deslocamento vertical de 1 a 4 pt.
-   const linha=pedacos.filter(it=>Math.abs(it.y-cab.y)<=5 && it.x>largura*.11).sort((a,b)=>a.x-b.x);
-   const descricoes=linha.filter(it=>it.x<largura*.76);
-   const valores=linha.filter(it=>it.x>=largura*.76);
-   const descricao=descricoes.map(it=>it.s).join(' ').replace(/\s+/g,' ').trim();
-   const valoresEncontrados=(valores.map(it=>it.s).join(' ').match(valorRE)||[]);
-   if(!descricao||valoresEncontrados.length<2||/^\d{2}\/\d{2}\/\d{4}/.test(descricao))continue;
-   // Evita o cabeçalho/código de barras nas páginas de pagamento.
-   if(!/^(?:[A-Z0-9*]|[À-ÿ])/i.test(descricao))continue;
-   const data=normalizarData(cab.s,mes),valor=parseDinheiro(valoresEncontrados[0]);
+ const resultado=[];
+ const dataRE=/^\d{2}[\/.-]\d{2}[\/.-]\d{2,4}$/;
+ const valorRE=/-?(?:\d{1,3}(?:\.\d{3})+|\d+),\d{2}/g;
+ for(const pagina of paginas){
+  const largura=pagina.largura||595;
+  const partes=(pagina.items||[]).filter(t=>t.str&&String(t.str).trim()).map(t=>({s:String(t.str).trim(),x:t.transform[4],y:t.transform[5]}));
+  // Agrupa os fragmentos pela altura da linha; XP fornece data, descrição e valores em itens separados.
+  const grupos=[];
+  partes.sort((a,b)=>b.y-a.y||a.x-b.x).forEach(p=>{
+   let g=grupos.find(x=>Math.abs(x.y-p.y)<=3);
+   if(!g){g={y:p.y,items:[]};grupos.push(g);}
+   g.items.push(p);
+  });
+  for(const g of grupos){
+   const row=g.items.sort((a,b)=>a.x-b.x);
+   const indice=row.findIndex(x=>dataRE.test(x.s)&&x.x<largura*.24);
+   if(indice<0)continue;
+   const cab=row[indice];
+   const texto=row.filter(x=>x!==cab&&x.x>=largura*.10&&x.x<largura*.79).map(x=>x.s).join(' ').replace(/\s+/g,' ').trim();
+   const lado=row.filter(x=>x.x>=largura*.79).map(x=>x.s).join(' ');
+   const valores=lado.match(valorRE)||[];
+   if(!texto||!valores.length)continue;
+   if(/^(?:subtotal|total|limite|vencimento|pagamento mínimo)/i.test(texto))continue;
+   // Não incluir liquidação da fatura anterior como nova compra.
+   if(/pagamento de fatura/i.test(texto))continue;
+   const data=normalizarData(cab.s,mes),valor=parseDinheiro(valores[0]);
    if(!data||!Number.isFinite(valor)||valor===0)continue;
-   const excluir=valor<0||/pagamento(?:\s+de|\s+da)?\s+fatura|estorno|total da fatura|saldo anterior|cr[eé]dito recebido/i.test(descricao);
-   const parc=parcelaDaDescricao(descricao);
-   saida.push({data,descricao,categoria:classificar(descricao),valor:Math.abs(valor),parcelaAtual:parc.atual,parcelas:parc.total,selecionado:!excluir,excluido:excluir});
+   const credito=valor<0||/estorno|crédito de|credito de/i.test(texto);
+   const parcela=parcelaDaDescricao(texto);
+   resultado.push({data,descricao:texto,categoria:classificar(texto),valor:Math.abs(valor),parcelaAtual:parcela.atual,parcelas:parcela.total,selecionado:!credito,excluido:credito,creditoFatura:credito,valorOriginal:valor});
   }
  }
- return saida;
+ return resultado;
 }
 function chaveImp(x,cartaoId,mes){return [cartaoId,mes,Number(x.valor).toFixed(2),String(x.descricao).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'').trim(),x.data||''].join('|');}
 function jaExisteImp(x){
